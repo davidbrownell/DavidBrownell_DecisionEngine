@@ -21,4 +21,5 @@ Deactivate.*.sh
 .coverage
 coverage.xml
 
+build/*
 .vscode/*
