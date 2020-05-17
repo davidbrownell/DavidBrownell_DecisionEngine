@@ -30,19 +30,19 @@
 namespace NS                                = DecisionEngine::Core::Components;
 
 TEST_CASE("Condition - Construct") {
-    std::shared_ptr<NS::Condition> const    pCondition(NS::Condition::Create("The Condition", 10));
+    std::shared_ptr<NS::Condition> const    pCondition(NS::Condition::Create("The Condition", static_cast<unsigned short>(10)));
 
     CHECK(pCondition->Name == "The Condition");
     CHECK(pCondition->MaxScore == 10);
 }
 
 TEST_CASE("Condition - Construct errors") {
-    CHECK_THROWS_MATCHES(NS::Condition::Create("", 10), std::invalid_argument, Catch::Matchers::Exception::ExceptionMessageMatcher("name"));
-    CHECK_THROWS_MATCHES(NS::Condition::Create("The Condition", 0), std::invalid_argument, Catch::Matchers::Exception::ExceptionMessageMatcher("maxScore"));
+    CHECK_THROWS_MATCHES(NS::Condition::Create("", static_cast<unsigned short>(10)), std::invalid_argument, Catch::Matchers::Exception::ExceptionMessageMatcher("name"));
+    CHECK_THROWS_MATCHES(NS::Condition::Create("The Condition", static_cast<unsigned short>(0)), std::invalid_argument, Catch::Matchers::Exception::ExceptionMessageMatcher("maxScore"));
 }
 
 TEST_CASE("Condition - Move") {
-    std::shared_ptr<NS::Condition>          p1(NS::Condition::Create("The Condition", 10));
+    std::shared_ptr<NS::Condition>          p1(NS::Condition::Create("The Condition", static_cast<unsigned short>(10)));
     std::shared_ptr<NS::Condition>          p2(std::make_shared<NS::Condition>(std::move(*p1)));
 
     CHECK(p2->Name == "The Condition");
@@ -50,13 +50,13 @@ TEST_CASE("Condition - Move") {
 }
 
 TEST_CASE("Condition - Compare") {
-    CHECK(CommonHelpers::TestHelpers::CompareTest(*NS::Condition::Create("0", 10), *NS::Condition::Create("1", 10)) == 0);
-    CHECK(CommonHelpers::TestHelpers::CompareTest(*NS::Condition::Create("0", 10), *NS::Condition::Create("0", 100)) == 0);
-    CHECK(CommonHelpers::TestHelpers::CompareTest(*NS::Condition::Create("0", 10), *NS::Condition::Create("0", 10), true) == 0);
+    CHECK(CommonHelpers::TestHelpers::CompareTest(*NS::Condition::Create("0", static_cast<unsigned short>(10)), *NS::Condition::Create("1", static_cast<unsigned short>(10))) == 0);
+    CHECK(CommonHelpers::TestHelpers::CompareTest(*NS::Condition::Create("0", static_cast<unsigned short>(10)), *NS::Condition::Create("0", static_cast<unsigned short>(100))) == 0);
+    CHECK(CommonHelpers::TestHelpers::CompareTest(*NS::Condition::Create("0", static_cast<unsigned short>(10)), *NS::Condition::Create("0", static_cast<unsigned short>(10)), true) == 0);
 }
 
 TEST_CASE("Condition - Serialize") {
-    CHECK(BoostHelpers::TestHelpers::SerializePtrTest(NS::Condition::Create("Condition", 10)) == 0);
+    CHECK(BoostHelpers::TestHelpers::SerializePtrTest(NS::Condition::Create("Condition", static_cast<unsigned short>(10))) == 0);
 }
 
 TEST_CASE("Result construction - bool ctor") {
