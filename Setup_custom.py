@@ -134,24 +134,6 @@ def GetDependencies():
                 ],
             )
 
-    d["system_compiler"] = Configuration(
-        "System Compiler",
-        [
-            Dependency(
-                "F33C43DA6BB54336A7573B39509CDAD7",
-                "Common_cpp_Common",
-                CurrentShell.Architecture,
-                "https://github.com/davidbrownell/Common_cpp_Common.git",
-            ),
-            Dependency(
-                "2B1EBD87C47E495B9330C0304D461141",
-                "Common_cpp_boost_Helpers",
-                "1.70.0",
-                "https://github.com/davidbrownell/Common_cpp_boost_Helpers.git",
-            ),
-        ],
-    )
-
     for architecture in architectures:
         for compiler_info in compiler_infos:
             if compiler_info[0].startswith("MSVC"):
