@@ -98,13 +98,19 @@ def GetDependencies():
 
     if CurrentShell.CategoryName == "Windows":
         architectures = ["x64", "x86"]
-    else:
-        architectures = ["x64"]
 
-    for compiler, compiler_id, configuration_suffix in [
-        ("MSVC_2019", "AB7D87C49C2449F79D9F42E5195030FD", None),
-        ("Clang_8", "3DE9F3430E494A6C8429B26A1503C895", "-ex"),
-    ]:
+        compiler_infos = [
+            ("MSVC_2019", "AB7D87C49C2449F79D9F42E5195030FD", None),
+            ("Clang_8", "3DE9F3430E494A6C8429B26A1503C895", "-ex"),
+        ]
+    else:
+        architectures = [CurrentShell.Architecture]
+
+        compiler_infos = [
+            ("Clang_8", "3DE9F3430E494A6C8429B26A1503C895", "-ex"),
+        ]
+
+    for compiler, compiler_id, configuration_suffix in compiler_infos:
         for architecture in architectures:
             d["{}_{}".format(compiler, architecture)] = Configuration(
                 "{} [{}]".format(compiler, architecture),
@@ -129,8 +135,15 @@ def GetDependencies():
             )
 
     for architecture in architectures:
-        d["MSVC_{}".format(architecture)] = d["MSVC_2019_{}".format(architecture)]
-        d["Clang_{}".format(architecture)] = d["Clang_8_{}".format(architecture)]
+        for compiler_info in compiler_infos:
+            if compiler_info[0].startswith("MSVC"):
+                d["MSVC_{}".format(architecture)] = d["MSVC_2019_{}".format(architecture)]
+                break
+
+        for compiler_info in compiler_infos:
+            if compiler_info[0].startswith("Clang"):
+                d["Clang_{}".format(architecture)] = d["Clang_8_{}".format(architecture)]
+                break
 
         d[architecture] = d["Clang_{}".format(architecture)]
 
