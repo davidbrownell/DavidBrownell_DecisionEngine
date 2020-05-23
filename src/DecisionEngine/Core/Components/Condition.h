@@ -51,7 +51,7 @@ public:
 
     /////////////////////////////////////////////////////////////////////////
     ///  \class         Result
-    ///  \brief         The result of applying a `Condition` to a `Request` or
+    ///  \brief         IsThe result of applying a `Condition` to a `Request` or
     ///                 a `Resource`. `Results` are successful or unsuccessful,
     ///                 where a Ratio can be used to indicate partial success.
     ///                 The Ratio is an arbitrary value meaningful only to the
