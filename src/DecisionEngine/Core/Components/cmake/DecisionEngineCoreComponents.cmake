@@ -21,8 +21,11 @@ function(Impl)
             DecisionEngineCoreComponents
 
         FILES
+            ${_this_path}/../Components.h
             ${_this_path}/../Condition.cpp
             ${_this_path}/../Condition.h
+            ${_this_path}/../Score.cpp
+            ${_this_path}/../Score.h
 
         PUBLIC_LINK_LIBRARIES
             BoostHelpers
