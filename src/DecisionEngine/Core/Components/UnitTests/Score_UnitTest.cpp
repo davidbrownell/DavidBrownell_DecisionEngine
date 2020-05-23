@@ -21,7 +21,6 @@
 /////////////////////////////////////////////////////////////////////////
 #define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do this in one cpp file
 #define CATCH_CONFIG_CONSOLE_WIDTH 200
-#define AUTOMATED_TEST
 #include "../Score.h"
 #include <catch.hpp>
 
@@ -40,7 +39,17 @@ namespace NS                                = DecisionEngine::Core::Components;
 // |  Internal Types and Methods
 // |
 // ----------------------------------------------------------------------
+
+#if (defined __clang__)
+#   pragma clang diagnostic push
+#   pragma clang diagnostic ignored "-Wexit-time-destructors"
+#endif
+
 NS::Condition::Result::ConditionPtr const   g_pCondition(NS::Condition::Create("Global Condition", static_cast<unsigned short>(100)));
+
+#if (defined __clang__)
+#   pragma clang diagnostic pop
+#endif
 
 // ----------------------------------------------------------------------
 // |
