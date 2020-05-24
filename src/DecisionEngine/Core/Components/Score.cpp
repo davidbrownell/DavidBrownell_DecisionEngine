@@ -22,6 +22,7 @@
 #include "Score.h"
 #include "Components.h"
 
+#include <CommonHelpers/Misc.h>
 #include <CommonHelpers/Stl.h>
 
 #include <cassert>
@@ -331,31 +332,54 @@ Score::Score(void) :
     )
 {}
 
+Score::Score(Result suffix, bool completesGroup) :
+    Score(
+        ResultGroupPtrsPtr(),
+        ResultPtrsPtr(),
+        std::make_unique<SuffixInfo>(std::move(suffix), completesGroup)
+    )
+{}
+
+Score::Score(Condition::Result suffix, bool completesGroup) :
+    Score(
+        Result(
+            Score::Result::ConditionResults(),
+            CommonHelpers::Stl::CreateVector<Condition::Result>(std::move(suffix)),
+            Score::Result::ConditionResults()
+        ),
+        completesGroup
+    )
+{}
+
 Score::Score(Score const &score, Result suffix, bool completesGroup) :
     Score(
         score._pResultGroups,
         score._pResults,
         std::make_unique<SuffixInfo>(std::move(suffix), completesGroup)
     )
-{}
+{
+    ENSURE_ARGUMENT(score, score.HasSuffix() == false);
+}
 
 Score::Score(Score const &score, Condition::Result suffix, bool completesGroup) :
     Score(
-        score._pResultGroups,
-        score._pResults,
-        std::make_unique<SuffixInfo>(
-            Result(
-                Score::Result::ConditionResults(),
-                CommonHelpers::Stl::CreateVector<Condition::Result>(std::move(suffix)),
-                Score::Result::ConditionResults()
-            ),
-            completesGroup
-        )
+        score,
+        Result(
+            Score::Result::ConditionResults(),
+            CommonHelpers::Stl::CreateVector<Condition::Result>(std::move(suffix)),
+            Score::Result::ConditionResults()
+        ),
+        completesGroup
     )
-{}
+{
+    ENSURE_ARGUMENT(score, score.HasSuffix() == false);
+}
 
 // static
 int Score::Compare(Score const &a, Score const &b) {
+    if(static_cast<void const *>(&a) == static_cast<void const *>(&b))
+        return 0;
+
     if(a.IsSuccessful != b.IsSuccessful)
         return a.IsSuccessful == false ? -1 : 1;
 
@@ -409,6 +433,9 @@ int Score::Compare(Score const &a, Score const &b) {
 
         return isThatSuccessful ? -1 : 1;
     }
+
+    assert(pThisGroupPtr == pThisGroupEnd);
+    assert(pThatGroupPtr == pThatGroupEnd);
 
     return CompareGroups(a._pendingData, b._pendingData);
 }

@@ -265,6 +265,8 @@ public:
     // |
     // ----------------------------------------------------------------------
     Score(void);
+    Score(Result suffix, bool completesGroup);
+    Score(Condition::Result suffix, bool completesGroup);
     Score(Score const &score, Result suffix, bool completesGroup);
     Score(Score const &score, Condition::Result suffix, bool completesGroup);
 
