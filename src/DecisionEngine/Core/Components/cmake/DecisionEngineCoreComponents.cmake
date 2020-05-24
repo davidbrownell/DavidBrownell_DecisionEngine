@@ -24,6 +24,8 @@ function(Impl)
             ${_this_path}/../Components.h
             ${_this_path}/../Condition.cpp
             ${_this_path}/../Condition.h
+            ${_this_path}/../Index.cpp
+            ${_this_path}/../Index.h
             ${_this_path}/../Score.cpp
             ${_this_path}/../Score.h
 
