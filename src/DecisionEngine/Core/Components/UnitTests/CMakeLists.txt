@@ -22,6 +22,7 @@ function(Impl)
         FILES
             ${_this_path}/Components_UnitTest.cpp
             ${_this_path}/Condition_UnitTest.cpp
+            ${_this_path}/Index_UnitTest.cpp
             ${_this_path}/Score_UnitTest.cpp
 
         LINK_LIBRARIES

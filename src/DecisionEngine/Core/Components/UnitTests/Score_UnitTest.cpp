@@ -898,6 +898,36 @@ TEST_CASE("Score - Construct - Empty") {
     CHECK(score.HasSuffix() == false);
 }
 
+TEST_CASE("Score - Construct - Errors") {
+    CHECK_THROWS_MATCHES(
+        NS::Score(
+            NS::Score(
+                NS::Score(),
+                CreateResult(true),
+                false
+            ),
+            CreateResult(true),
+            false
+        ),
+        std::invalid_argument,
+        Catch::Matchers::Exception::ExceptionMessageMatcher("score")
+    );
+
+    CHECK_THROWS_MATCHES(
+        NS::Score(
+            NS::Score(
+                NS::Score(),
+                NS::Condition::Result(g_pCondition, true),
+                false
+            ),
+            NS::Condition::Result(g_pCondition, true),
+            false
+        ),
+        std::invalid_argument,
+        Catch::Matchers::Exception::ExceptionMessageMatcher("score")
+    );
+}
+
 TEST_CASE("Score - Construct - Single - (Success)") {
     NS::Score const                         score(NS::Score(), NS::Condition::Result(g_pCondition, true), false);
 
