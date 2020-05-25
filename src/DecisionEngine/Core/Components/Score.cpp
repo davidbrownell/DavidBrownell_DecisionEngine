@@ -22,11 +22,6 @@
 #include "Score.h"
 #include "Components.h"
 
-#include <CommonHelpers/Misc.h>
-#include <CommonHelpers/Stl.h>
-
-#include <cassert>
-
 namespace DecisionEngine {
 namespace Core {
 namespace Components {

@@ -9,8 +9,6 @@ endif()
 include(BuildHelpers)
 
 function(Impl)
-    include(BoostCommon)
-
     include(BoostHelpers)
     include(CommonHelpers)
 
@@ -28,11 +26,18 @@ function(Impl)
             ${_this_path}/../Index.h
             ${_this_path}/../Score.cpp
             ${_this_path}/../Score.h
+            ${_this_path}/../System.cpp
+            ${_this_path}/../System.h
+
+        PRECOMPILED_HEADERS
+            ${_this_path}/../Components.h
+
+        PUBLIC_INCLUDE_DIRECTORIES
+            ${_this_path}/../../../..
 
         PUBLIC_LINK_LIBRARIES
             BoostHelpers
             CommonHelpers
-            ${Boost_LIBRARIES}
     )
 endfunction()
 
