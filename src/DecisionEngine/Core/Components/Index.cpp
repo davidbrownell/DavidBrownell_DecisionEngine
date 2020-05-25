@@ -21,8 +21,6 @@
 /////////////////////////////////////////////////////////////////////////
 #include "Index.h"
 
-#include <CommonHelpers/Misc.h>
-
 namespace DecisionEngine {
 namespace Core {
 namespace Components {

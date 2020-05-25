@@ -21,13 +21,7 @@
 /////////////////////////////////////////////////////////////////////////
 #pragma once
 
-#include <CommonHelpers/Misc.h>
-
-#include <BoostHelpers/Serialization.h>
-#include <BoostHelpers/SharedObject.h>
-
-#include <optional>
-#include <string>
+#include "Components.h"
 
 namespace DecisionEngine {
 namespace Core {

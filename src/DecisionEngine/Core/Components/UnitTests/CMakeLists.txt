@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.5.0)
 
+project(DecisionEngineCoreComponents_UnitTest LANGUAGES CXX)
+
 set(CppCommon_STATIC_CRT ON CACHE BOOL "" FORCE)
 set(CppCommon_NO_ADDRESS_SPACE_LAYOUT_RANDOMIZATION ON CACHE BOOL "" FORCE)
 
@@ -23,7 +25,13 @@ function(Impl)
             ${_this_path}/Components_UnitTest.cpp
             ${_this_path}/Condition_UnitTest.cpp
             ${_this_path}/Index_UnitTest.cpp
+            ${_this_path}/ResultSystem_UnitTest.cpp
             ${_this_path}/Score_UnitTest.cpp
+            ${_this_path}/System_UnitTest.cpp
+            ${_this_path}/WorkingSystem_UnitTest.cpp
+
+        PRECOMPILED_LIBRARY_HEADERS
+            DecisionEngineCoreComponents
 
         LINK_LIBRARIES
             DecisionEngineCoreComponents

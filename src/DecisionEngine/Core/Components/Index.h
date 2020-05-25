@@ -21,18 +21,7 @@
 /////////////////////////////////////////////////////////////////////////
 #pragma once
 
-#include <CommonHelpers/Copy.h>
-#include <CommonHelpers/Move.h>
-
-#include <BoostHelpers/Serialization.h>
-
-#include <boost/serialization/optional.hpp>
-#include <boost/serialization/vector.hpp>
-
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <vector>
+#include "Components.h"
 
 namespace DecisionEngine {
 namespace Core {
