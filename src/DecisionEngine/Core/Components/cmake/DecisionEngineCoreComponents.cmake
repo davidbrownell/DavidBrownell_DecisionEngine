@@ -28,6 +28,8 @@ function(Impl)
             ${_this_path}/../Score.h
             ${_this_path}/../System.cpp
             ${_this_path}/../System.h
+            ${_this_path}/../WorkingSystem.cpp
+            ${_this_path}/../WorkingSystem.h
 
         PRECOMPILED_HEADERS
             ${_this_path}/../Components.h
