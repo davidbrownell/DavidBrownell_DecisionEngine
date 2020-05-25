@@ -37,12 +37,15 @@
 #include <boost/archive/xml_iarchive.hpp>
 #include <boost/archive/xml_oarchive.hpp>
 
+#include <boost/serialization/deque.hpp>
 #include <boost/serialization/optional.hpp>
 #include <boost/serialization/string.hpp>
 #include <boost/serialization/vector.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <string>
