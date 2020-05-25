@@ -22,6 +22,8 @@ function(Impl)
 
     build_tests(
         FILES
+            ${_this_path}/CalculatedResultSystem_UnitTest.cpp
+            ${_this_path}/CalculatedWorkingSystem_UnitTest.cpp
             ${_this_path}/Components_UnitTest.cpp
             ${_this_path}/Condition_UnitTest.cpp
             ${_this_path}/Index_UnitTest.cpp
