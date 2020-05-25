@@ -134,19 +134,6 @@ def GetDependencies():
                 ],
             )
 
-    for architecture in architectures:
-        for compiler_info in compiler_infos:
-            if compiler_info[0].startswith("MSVC"):
-                d["MSVC_{}".format(architecture)] = d["MSVC_2019_{}".format(architecture)]
-                break
-
-        for compiler_info in compiler_infos:
-            if compiler_info[0].startswith("Clang"):
-                d["Clang_{}".format(architecture)] = d["Clang_8_{}".format(architecture)]
-                break
-
-        d[architecture] = d["Clang_{}".format(architecture)]
-
     return d
 
 
