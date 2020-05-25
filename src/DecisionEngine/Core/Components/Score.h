@@ -23,12 +23,6 @@
 
 #include "Condition.h"
 
-#include <boost/serialization/string.hpp>
-#include <boost/serialization/vector.hpp>
-
-#include <string>
-#include <vector>
-
 namespace DecisionEngine {
 namespace Core {
 namespace Components {
