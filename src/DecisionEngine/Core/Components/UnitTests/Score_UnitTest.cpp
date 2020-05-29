@@ -107,7 +107,7 @@ TEST_CASE("Score::Result - Construct - Applicable - (Failure)") {
     CHECK(result.PreferenceResults.empty());
 }
 
-TEST_CASE("Score::Result - Construct - Applicable - (Success, Failure)") {
+TEST_CASE("Score::Result - Construct - Applicable - (Success & Failure)") {
     NS::Score::Result const                 result(
         CommonHelpers::Stl::CreateVector<NS::Condition::Result>(
             NS::Condition::Result(g_pCondition, true),
@@ -131,7 +131,7 @@ TEST_CASE("Score::Result - Construct - Applicable - (Success, Failure)") {
     CHECK(result.PreferenceResults.empty());
 }
 
-TEST_CASE("Score::Result - Construct - Applicable - (Failure, Success)") {
+TEST_CASE("Score::Result - Construct - Applicable - (Failure & Success)") {
     NS::Score::Result const                 result(
         CommonHelpers::Stl::CreateVector<NS::Condition::Result>(
             NS::Condition::Result(g_pCondition, false),
@@ -155,7 +155,7 @@ TEST_CASE("Score::Result - Construct - Applicable - (Failure, Success)") {
     CHECK(result.PreferenceResults.empty());
 }
 
-TEST_CASE("Score::Result - Construct - Applicable - (Success, Success, Failure)") {
+TEST_CASE("Score::Result - Construct - Applicable - (Success & Success & Failure)") {
     NS::Score::Result const                 result(
         CommonHelpers::Stl::CreateVector<NS::Condition::Result>(
             NS::Condition::Result(g_pCondition, true),
@@ -200,7 +200,7 @@ TEST_CASE("Score::Result - Construct - Requirement - (Success)") {
     CHECK(result.PreferenceResults.empty());
 }
 
-TEST_CASE("Score::Result - Construct - Requirement - (Success, Success)") {
+TEST_CASE("Score::Result - Construct - Requirement - (Success & Success)") {
     NS::Score::Result const                 result(
         NS::Score::Result::ConditionResults{},
         CommonHelpers::Stl::CreateVector<NS::Condition::Result>(
@@ -245,7 +245,7 @@ TEST_CASE("Score::Result - Construct - Requirement - (Failure)") {
     CHECK(result.PreferenceResults.empty());
 }
 
-TEST_CASE("Score::Result - Construct - Requirement - (Success, Failure)") {
+TEST_CASE("Score::Result - Construct - Requirement - (Success & Failure)") {
     NS::Score::Result const                 result(
         NS::Score::Result::ConditionResults{},
         CommonHelpers::Stl::CreateVector<NS::Condition::Result>(
@@ -269,7 +269,7 @@ TEST_CASE("Score::Result - Construct - Requirement - (Success, Failure)") {
     CHECK(result.PreferenceResults.empty());
 }
 
-TEST_CASE("Score::Result - Construct - Requirement - (Failure, Success)") {
+TEST_CASE("Score::Result - Construct - Requirement - (Failure & Success)") {
     NS::Score::Result const                 result(
         NS::Score::Result::ConditionResults{},
         CommonHelpers::Stl::CreateVector<NS::Condition::Result>(
@@ -293,7 +293,7 @@ TEST_CASE("Score::Result - Construct - Requirement - (Failure, Success)") {
     CHECK(result.PreferenceResults.empty());
 }
 
-TEST_CASE("Score::Result - Construct - Requirement - (Success, Success, Failure)") {
+TEST_CASE("Score::Result - Construct - Requirement - (Success & Success & Failure)") {
     NS::Score::Result const                 result(
         NS::Score::Result::ConditionResults{},
         CommonHelpers::Stl::CreateVector<NS::Condition::Result>(
@@ -339,7 +339,7 @@ TEST_CASE("Score::Result - Construct - Preference - (Success)") {
     CHECK(result.PreferenceResults[0].Condition == g_pCondition);
 }
 
-TEST_CASE("Score::Result - Construct - Preference - (Success, Success)") {
+TEST_CASE("Score::Result - Construct - Preference - (Success & Success)") {
     NS::Score::Result const                 result(
         NS::Score::Result::ConditionResults{},
         NS::Score::Result::ConditionResults{},
@@ -380,7 +380,7 @@ TEST_CASE("Score::Result - Construct - Preference - (Failure)") {
     CHECK(result.PreferenceResults[0].Condition == g_pCondition);
 }
 
-TEST_CASE("Score::Result - Construct - Preference - (Success, Failure)") {
+TEST_CASE("Score::Result - Construct - Preference - (Success & Failure)") {
     NS::Score::Result const                 result(
         NS::Score::Result::ConditionResults{},
         NS::Score::Result::ConditionResults{},
@@ -403,7 +403,7 @@ TEST_CASE("Score::Result - Construct - Preference - (Success, Failure)") {
     CHECK(Approx(result.PreferenceResults[1].Ratio) == 0.5f);
 }
 
-TEST_CASE("Score::Result - Construct - Preference - (Failure, Success)") {
+TEST_CASE("Score::Result - Construct - Preference - (Failure & Success)") {
     NS::Score::Result const                 result(
         NS::Score::Result::ConditionResults{},
         NS::Score::Result::ConditionResults{},
@@ -426,7 +426,7 @@ TEST_CASE("Score::Result - Construct - Preference - (Failure, Success)") {
     CHECK(Approx(result.PreferenceResults[1].Ratio) == 0.4f);
 }
 
-TEST_CASE("Score::Result - Construct - Preference - (Success, Success, Failure)") {
+TEST_CASE("Score::Result - Construct - Preference - (Success & Success & Failure)") {
     NS::Score::Result const                 result(
         NS::Score::Result::ConditionResults{},
         NS::Score::Result::ConditionResults{},
@@ -633,7 +633,7 @@ TEST_CASE("Score::ResultGroup - Construct - (Success)") {
     CHECK(group.Results[0]->IsSuccessful);
 }
 
-TEST_CASE("Score::ResultGroup - Construct - (Success, Success)") {
+TEST_CASE("Score::ResultGroup - Construct - (Success & Success)") {
     NS::Score::ResultGroup const            group(
         CommonHelpers::Stl::CreateVector<NS::Score::ResultGroup::ResultPtr>(
             CreateResultPtr(true),
@@ -652,7 +652,7 @@ TEST_CASE("Score::ResultGroup - Construct - (Success, Success)") {
     CHECK(Approx(group.Results[1]->Score) == 50001.0f);
 }
 
-TEST_CASE("Score::ResultGroup - Construct - (Success, Not Applicable, Success)") {
+TEST_CASE("Score::ResultGroup - Construct - (Success & Not Applicable & Success)") {
     NS::Score::ResultGroup const            group(
         CommonHelpers::Stl::CreateVector<NS::Score::ResultGroup::ResultPtr>(
             CreateResultPtr(true),
@@ -680,7 +680,7 @@ TEST_CASE("Score::ResultGroup - Construct - (Success, Not Applicable, Success)")
     CHECK(Approx(group.Results[2]->Score) == 50001.0f);
 }
 
-TEST_CASE("Score::ResultGroup - Construct - (Not Applicable, Not Applicable)") {
+TEST_CASE("Score::ResultGroup - Construct - (Not Applicable & Not Applicable)") {
     NS::Score::ResultGroup const            group(
         CommonHelpers::Stl::CreateVector<NS::Score::ResultGroup::ResultPtr>(
             CreateResultPtr(true, 1.0f, false),
@@ -719,7 +719,7 @@ TEST_CASE("Score::ResultGroup - Construct - (Failure)") {
     CHECK(group.Results[0]->IsSuccessful == false);
 }
 
-TEST_CASE("Score::ResultGroup - Construct - (Success, Failure)") {
+TEST_CASE("Score::ResultGroup - Construct - (Success & Failure)") {
     NS::Score::ResultGroup const            group(
         CommonHelpers::Stl::CreateVector<NS::Score::ResultGroup::ResultPtr>(
             CreateResultPtr(true),
@@ -739,7 +739,7 @@ TEST_CASE("Score::ResultGroup - Construct - (Success, Failure)") {
     CHECK(group.Results[1]->IsSuccessful == false);
 }
 
-TEST_CASE("Score::ResultGroup - Construct - (Failure, Success)") {
+TEST_CASE("Score::ResultGroup - Construct - (Failure & Success)") {
     NS::Score::ResultGroup const            group(
         CommonHelpers::Stl::CreateVector<NS::Score::ResultGroup::ResultPtr>(
             CreateResultPtr(false),
@@ -952,7 +952,7 @@ NS::Score CreateResultGroup(NS::Score score, std::vector<bool> results) {
     return score;
 }
 
-TEST_CASE("Score - Construct - Group, Single - (Success, Success)") {
+TEST_CASE("Score - Construct - Group/Single - (Success & Success)") {
     NS::Score const                         score(
         CreateResultGroup(
             NS::Score(),
@@ -966,7 +966,7 @@ TEST_CASE("Score - Construct - Group, Single - (Success, Success)") {
     CHECK(score.HasSuffix());
 }
 
-TEST_CASE("Score - Construct - Group, Single - (Success, Failure)") {
+TEST_CASE("Score - Construct - Group/Single - (Success & Failure)") {
     NS::Score const                         score(
         CreateResultGroup(
             NS::Score(),
@@ -980,7 +980,7 @@ TEST_CASE("Score - Construct - Group, Single - (Success, Failure)") {
     CHECK(score.HasSuffix());
 }
 
-TEST_CASE("Score - Construct - Group, Single - (Failure, Success)") {
+TEST_CASE("Score - Construct - Group/Single - (Failure & Success)") {
     NS::Score const                         score(
         CreateResultGroup(
             NS::Score(),
@@ -994,7 +994,7 @@ TEST_CASE("Score - Construct - Group, Single - (Failure, Success)") {
     CHECK(score.HasSuffix());
 }
 
-TEST_CASE("Score - Construct - Group, Single - (Failure, Failure)") {
+TEST_CASE("Score - Construct - Group/Single - (Failure & Failure)") {
     NS::Score const                         score(
         CreateResultGroup(
             NS::Score(),
