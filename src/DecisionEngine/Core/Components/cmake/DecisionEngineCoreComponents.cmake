@@ -19,6 +19,10 @@ function(Impl)
             DecisionEngineCoreComponents
 
         FILES
+            ${_this_path}/../CalculatedResultSystem.cpp
+            ${_this_path}/../CalculatedResultSystem.h
+            ${_this_path}/../CalculatedWorkingSystem.cpp
+            ${_this_path}/../CalculatedWorkingSystem.h
             ${_this_path}/../Components.h
             ${_this_path}/../Condition.cpp
             ${_this_path}/../Condition.h
