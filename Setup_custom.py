@@ -100,19 +100,19 @@ def GetDependencies():
         architectures = ["x64", "x86"]
 
         compiler_infos = [
-            ("MSVC_2019", "AB7D87C49C2449F79D9F42E5195030FD", None),
-            ("Clang_8", "3DE9F3430E494A6C8429B26A1503C895", "-ex"),
+            ("MSVC-2019", "AB7D87C49C2449F79D9F42E5195030FD", None),
+            ("Clang-8", "3DE9F3430E494A6C8429B26A1503C895", "-ex"),
         ]
     else:
         architectures = [CurrentShell.Architecture]
 
         compiler_infos = [
-            ("Clang_8", "3DE9F3430E494A6C8429B26A1503C895", "-ex"),
+            ("Clang-8", "3DE9F3430E494A6C8429B26A1503C895", "-ex"),
         ]
 
     for compiler, compiler_id, configuration_suffix in compiler_infos:
         for architecture in architectures:
-            d["{}_{}".format(compiler, architecture)] = Configuration(
+            d["{}-{}".format(compiler, architecture)] = Configuration(
                 "{} [{}]".format(compiler, architecture),
                 [
                     Dependency(
@@ -125,7 +125,7 @@ def GetDependencies():
                         "2B1EBD87C47E495B9330C0304D461141",
                         "Common_cpp_boost_Helpers",
                         "1.70.0-{}-{}{}".format(
-                            compiler.replace("_", "-"),
+                            compiler,
                             architecture,
                             configuration_suffix or "",
                         ),
@@ -133,6 +133,10 @@ def GetDependencies():
                     ),
                 ],
             )
+
+    # Temporarily maintain the original configuration name until it is updated in DavidBrownell_Bootstrap.
+    # After that change, this line can be removed.
+    d["Clang_8_x64"] = d["Clang-8-x64"]
 
     return d
 
