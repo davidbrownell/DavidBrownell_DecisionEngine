@@ -44,7 +44,7 @@ System::System(TypeValue type, CompletionValue completion, Score score, Index in
         ENSURE_ARGUMENT(index, _index.HasSuffix() == false);
     }
     else
-        assert(false);
+        assert(!"Unexpected CompletionValue");
 }
 
 System & System::UpdateScore(Score score) {

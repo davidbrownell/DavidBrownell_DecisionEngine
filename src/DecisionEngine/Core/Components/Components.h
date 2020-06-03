@@ -23,6 +23,7 @@
 
 #include <CommonHelpers/Compare.h>
 #include <CommonHelpers/Copy.h>
+#include <CommonHelpers/Finally.h>
 #include <CommonHelpers/Move.h>
 #include <CommonHelpers/Misc.h>
 #include <CommonHelpers/Stl.h>
@@ -46,9 +47,12 @@
 #include <cassert>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 // This file must be included after all of the serialization helpers
