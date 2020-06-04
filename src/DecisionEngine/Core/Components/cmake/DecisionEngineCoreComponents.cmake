@@ -26,6 +26,10 @@ function(Impl)
             ${_this_path}/../Components.h
             ${_this_path}/../Condition.cpp
             ${_this_path}/../Condition.h
+            # BugBug ${_this_path}/../EngineImpl.cpp
+            # BugBug ${_this_path}/../EngineImpl.h
+            ${_this_path}/../Fingerprinter.cpp
+            ${_this_path}/../Fingerprinter.h
             ${_this_path}/../Index.cpp
             ${_this_path}/../Index.h
             ${_this_path}/../ResultSystem.cpp
