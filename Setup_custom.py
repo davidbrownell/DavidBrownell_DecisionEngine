@@ -134,10 +134,6 @@ def GetDependencies():
                 ],
             )
 
-    # Temporarily maintain the original configuration name until it is updated in DavidBrownell_Bootstrap.
-    # After that change, this line can be removed.
-    d["Clang_8_x64"] = d["Clang-8-x64"]
-
     return d
 
 
