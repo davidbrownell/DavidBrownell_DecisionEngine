@@ -27,6 +27,8 @@
 #include <CommonHelpers/Move.h>
 #include <CommonHelpers/Misc.h>
 #include <CommonHelpers/Stl.h>
+#include <CommonHelpers/ThreadPool.h>
+#include <CommonHelpers/ThreadSafeCounter.h>
 
 #include <BoostHelpers/Serialization.h>
 #include <BoostHelpers/SharedObject.h>
@@ -69,6 +71,12 @@ namespace Core {
 ///
 namespace Components {
 
+// ----------------------------------------------------------------------
+// |  Public Types
+using ThreadPool                            = CommonHelpers::ComplexThreadPool;
+
+// ----------------------------------------------------------------------
+// |  Public Data
 static float const constexpr                MaxScore = 100001.0;
 
 } // namespace Components
