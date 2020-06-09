@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.5.0)
 
-project(DecisionEngineCoreComponents_UnitTest LANGUAGES CXX)
+project(DecisionEngineCoreComponents_UnitTests LANGUAGES CXX)
 
 set(CppCommon_STATIC_CRT ON CACHE BOOL "" FORCE)
 set(CppCommon_NO_ADDRESS_SPACE_LAYOUT_RANDOMIZATION ON CACHE BOOL "" FORCE)

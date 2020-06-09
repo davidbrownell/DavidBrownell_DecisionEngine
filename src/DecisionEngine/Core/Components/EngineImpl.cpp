@@ -308,6 +308,7 @@ std::tuple<SystemPtrs, SystemPtrsContainer> Merge(
 
     if(dynamicScoreInfo) {
         // ----------------------------------------------------------------------
+        // BugBug: Use ThreadPool parallel
         using Futures                       = std::vector<CommonHelpers::ThreadPoolFuture<bool>>;
 
         struct DynamicScoreInternal {

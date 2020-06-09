@@ -57,12 +57,17 @@ class Observer {
 public:
     // ----------------------------------------------------------------------
     // |  Public Types
-    using SystemPtr                         = DecisionEngine::Core::Components::EngineImpl::SystemPtrs;
+    using WorkingSystem                     = DecisionEngine::Core::Components::WorkingSystem;
+
+    using SystemPtrs                        = DecisionEngine::Core::Components::EngineImpl::SystemPtrs;
+    using SystemPtrsContainer               = DecisionEngine::Core::Components::EngineImpl::SystemPtrsContainer;
+
+    using ResultSystemUniquePtr             = DecisionEngine::Core::Components::EngineImpl::ResultSystemUniquePtr;
 
     // ----------------------------------------------------------------------
     // |  Public Methods
     virtual bool OnBegin(size_t iteration, size_t maxIterations) = 0;
-    virtual void OnEnd(size_t iteration, size_t maxItrations) = 0;
+    virtual void OnEnd(size_t iteration, size_t maxIterations) = 0;
 
     virtual bool OnResultSystem(size_t iteration, size_t maxIterations, ResultSystemUniquePtr pResult) = 0;
 
