@@ -90,7 +90,7 @@ Score::Result::Result(
                 maxPossibleScore += result.Condition->MaxScore;
             }
 
-            return maxPossibleScore != 0 ? score / maxPossibleScore : 1.0f;
+            return maxPossibleScore != 0 ? score / static_cast<float>(maxPossibleScore) : 1.0f;
         }
     };
     // ----------------------------------------------------------------------
@@ -117,7 +117,7 @@ Score::Result::Result(
     assert(requirementsScore >= 0.0f && requirementsScore <= 1.0f);
     assert(preferencesScore >= 0.0f && preferencesScore <= 1.0f);
 
-    make_mutable(Score) = static_cast<unsigned long>(requirementsScore * (MaxScore - 1)) + preferencesScore;
+    make_mutable(Score) = requirementsScore * (MaxScore - 1) + preferencesScore;
     assert(Score <= MaxScore);
 }
 
@@ -152,7 +152,7 @@ auto ConstructResultGroupTuple(Score::ResultGroup::ResultPtrs results) {
     return std::make_tuple(
         std::move(results),
         numFailures == 0,
-        numResults ? totalScore / numResults : totalScore,
+        numResults ? totalScore / static_cast<float>(numResults) : totalScore,
         numResults,
         numFailures
     );
@@ -276,7 +276,7 @@ Score::PendingData::PendingData(ResultPtrs const *pOptionalResults, Result const
     if(pOptionalResult)
         processResultsFunc(*pOptionalResult);
 
-    float                                   averageScore(numResults ? totalScore / numResults : totalScore);
+    float                                   averageScore(numResults ? totalScore / static_cast<float>(numResults) : totalScore);
 
     assert(averageScore >= 0.0f && averageScore <= MaxScore);
 
