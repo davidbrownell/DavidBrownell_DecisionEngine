@@ -101,13 +101,13 @@ def GetDependencies():
 
         compiler_infos = [
             ("MSVC-2019", "AB7D87C49C2449F79D9F42E5195030FD", None),
-            ("Clang-8", "3DE9F3430E494A6C8429B26A1503C895", "-ex"),
+            ("Clang-10", "42DE100A1DAE4FFC9697F75566C63DEB", "-ex"),
         ]
     else:
         architectures = [CurrentShell.Architecture]
 
         compiler_infos = [
-            ("Clang-8", "3DE9F3430E494A6C8429B26A1503C895", "-ex"),
+            ("Clang-10", "42DE100A1DAE4FFC9697F75566C63DEB", "-ex"),
         ]
 
     for compiler, compiler_id, configuration_suffix in compiler_infos:
@@ -117,7 +117,7 @@ def GetDependencies():
                 [
                     Dependency(
                         compiler_id,
-                        "Common_cpp_{}".format(compiler),
+                        "Common_cpp_{}".format(compiler.replace("-", "_")),
                         "{}{}".format(architecture, configuration_suffix or ""),
                         "https://github.com/davidbrownell/Common_cpp_{}.git".format(compiler),
                     ),
