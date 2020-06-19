@@ -308,10 +308,8 @@ std::tuple<SystemPtrs, SystemPtrsContainer> Merge(
 
     if(dynamicScoreInfo) {
         // ----------------------------------------------------------------------
-        using Futures                       = std::vector<CommonHelpers::ThreadPoolFuture<bool>>;
-
         struct DynamicScoreInternal {
-            static bool Execute(DynamicScoreFunctor const &scoreFunc, SystemPtrs &ptrs) {
+            static void Execute(DynamicScoreFunctor const &scoreFunc, SystemPtrs &ptrs) {
                 bool                        hasChanged(false);
 
                 for(SystemPtr & ptr : ptrs) {
@@ -325,30 +323,20 @@ std::tuple<SystemPtrs, SystemPtrsContainer> Merge(
 
                 if(hasChanged)
                     std::sort(ptrs.begin(), ptrs.end(), Sorter);
-
-                return hasChanged;
             }
         };
         // ----------------------------------------------------------------------
 
         ThreadPool &                        pool(std::get<0>(*dynamicScoreInfo));
         DynamicScoreFunctor const &         scoreFunc(std::get<1>(*dynamicScoreInfo));
-        Futures                             futures;
 
-        futures.reserve(items.size());
-
-        for(SystemPtrs &ptrs : items) {
-            futures.emplace_back(
-                pool.enqueue_task(
-                    [&scoreFunc, &ptrs](void) {
-                        return DynamicScoreInternal::Execute(scoreFunc, ptrs);
-                    }
-                )
-            );
-        }
-
-        for(auto & future : futures)
-            future.wait();
+        pool.parallel(
+            items.begin(),
+            items.end(),
+            [&scoreFunc](SystemPtrs &ptrs) {
+                DynamicScoreInternal::Execute(scoreFunc, ptrs);
+            }
+        );
     }
 
 #if (defined DEBUG)
