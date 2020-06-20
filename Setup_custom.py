@@ -100,31 +100,31 @@ def GetDependencies():
         architectures = ["x64", "x86"]
 
         compiler_infos = [
-            ("MSVC-2019", "AB7D87C49C2449F79D9F42E5195030FD", None),
-            ("Clang-10", "42DE100A1DAE4FFC9697F75566C63DEB", "-ex"),
+            ("MSVC_2019", "AB7D87C49C2449F79D9F42E5195030FD", None),
+            ("Clang_10", "42DE100A1DAE4FFC9697F75566C63DEB", "_ex"),
         ]
     else:
         architectures = [CurrentShell.Architecture]
 
         compiler_infos = [
-            ("Clang-10", "42DE100A1DAE4FFC9697F75566C63DEB", "-ex"),
+            ("Clang_10", "42DE100A1DAE4FFC9697F75566C63DEB", "_ex"),
         ]
 
     for compiler, compiler_id, configuration_suffix in compiler_infos:
         for architecture in architectures:
-            d["{}-{}".format(compiler, architecture)] = Configuration(
+            d["{}_{}".format(compiler, architecture)] = Configuration(
                 "{} [{}]".format(compiler, architecture),
                 [
                     Dependency(
                         compiler_id,
-                        "Common_cpp_{}".format(compiler.replace("-", "_")),
+                        "Common_cpp_{}".format(compiler),
                         "{}{}".format(architecture, configuration_suffix or ""),
                         "https://github.com/davidbrownell/Common_cpp_{}.git".format(compiler),
                     ),
                     Dependency(
                         "2B1EBD87C47E495B9330C0304D461141",
                         "Common_cpp_boost_Helpers",
-                        "1.70.0-{}-{}{}".format(
+                        "1.70.0_{}_{}{}".format(
                             compiler,
                             architecture,
                             configuration_suffix or "",
