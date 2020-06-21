@@ -51,7 +51,7 @@ using WorkingSystemPtr                      = std::shared_ptr<WorkingSystem>;
 
 /////////////////////////////////////////////////////////////////////////
 ///  \class         Observer
-///  \brief         Observes events generated during `ExecuteRound`.
+///  \brief         Observes events generated during `ExecuteTask`.
 ///
 class Observer {
 public:
@@ -66,6 +66,8 @@ public:
 
     // ----------------------------------------------------------------------
     // |  Public Methods
+    virtual ~Observer(void) = default;
+
     virtual bool OnBegin(size_t iteration, size_t maxIterations) = 0;
     virtual void OnEnd(size_t iteration, size_t maxIterations) = 0;
 
@@ -78,11 +80,6 @@ public:
     virtual void OnMergedWork(size_t iteration, size_t maxIterations, WorkingSystem const &active, SystemPtrs const &pending, SystemPtrsContainer removed) = 0;
 
     virtual void OnFailedSystems(size_t iteration, size_t maxIterations, WorkingSystem const &active, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) = 0;
-
-protected:
-    // ----------------------------------------------------------------------
-    // |  Protected Methods
-    ~Observer(void) = default;
 };
 
 /////////////////////////////////////////////////////////////////////////
@@ -94,18 +91,17 @@ protected:
 using DynamicScoreFunctor                   = std::function<Score (System const &, Score const &)>;
 
 /////////////////////////////////////////////////////////////////////////
-///  \fn            ExecuteRound
+///  \fn            ExecuteTask
 ///  \brief         Executes a round of System generation, where the number of
 ///                 iterations is specified by the caller.
 ///
-SystemPtrs ExecuteRound(
+SystemPtrs ExecuteTask(
     Fingerprinter &fingerprinter,
     Observer &observer,
     size_t maxNumPendingSystems,
     size_t maxNumChildrenPerGeneration,
     size_t maxNumIterations,
     bool continueProcessingSystemWithFailures,
-    std::atomic<bool> const &isCancelled,
     WorkingSystemPtr pInitial,
     std::optional<std::tuple<ThreadPool &, DynamicScoreFunctor const &>> const &dynamicScoreInfo=std::nullopt
 );

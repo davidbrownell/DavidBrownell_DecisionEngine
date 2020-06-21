@@ -66,6 +66,7 @@ TEST_CASE("Score::Result - Construct - No results") {
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful);
     CHECK(Approx(result.Score) == NS::MaxScore);
+    CHECK(result.ToString() == "Result(1,1,100001.00)");
     CHECK(result.ApplicabilityResults.empty());
     CHECK(result.RequirementResults.empty());
     CHECK(result.PreferenceResults.empty());
@@ -83,6 +84,7 @@ TEST_CASE("Score::Result - Construct - Applicable - (Success)") {
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful);
     CHECK(Approx(result.Score) == NS::MaxScore);
+    CHECK(result.ToString() == "Result(1,1,100001.00)");
     REQUIRE(result.ApplicabilityResults.size() == 1);
     CHECK(result.ApplicabilityResults[0].Condition == g_pCondition);
     CHECK(result.RequirementResults.empty());
@@ -101,6 +103,7 @@ TEST_CASE("Score::Result - Construct - Applicable - (Failure)") {
     CHECK(result.IsApplicable == false);
     CHECK(result.IsSuccessful == false);
     CHECK(Approx(result.Score) == 0.0f);
+    CHECK(result.ToString() == "Result(0,0,0.00)");
     REQUIRE(result.ApplicabilityResults.size() == 1);
     CHECK(result.ApplicabilityResults[0].Condition == g_pCondition);
     CHECK(result.RequirementResults.empty());
@@ -120,6 +123,7 @@ TEST_CASE("Score::Result - Construct - Applicable - (Success & Failure)") {
     CHECK(result.IsApplicable == false);
     CHECK(result.IsSuccessful == false);
     CHECK(Approx(result.Score) == 0.0f);
+    CHECK(result.ToString() == "Result(0,0,0.00)");
 
     REQUIRE(result.ApplicabilityResults.size() == 2);
     CHECK(result.ApplicabilityResults[0].Condition == g_pCondition);
@@ -144,6 +148,7 @@ TEST_CASE("Score::Result - Construct - Applicable - (Failure & Success)") {
     CHECK(result.IsApplicable == false);
     CHECK(result.IsSuccessful == false);
     CHECK(Approx(result.Score) == 0.0f);
+    CHECK(result.ToString() == "Result(0,0,0.00)");
 
     REQUIRE(result.ApplicabilityResults.size() == 2);
     CHECK(result.ApplicabilityResults[0].Condition == g_pCondition);
@@ -169,6 +174,7 @@ TEST_CASE("Score::Result - Construct - Applicable - (Success & Success & Failure
     CHECK(result.IsApplicable == false);
     CHECK(result.IsSuccessful == false);
     CHECK(Approx(result.Score) == 0.0f);
+    CHECK(result.ToString() == "Result(0,0,0.00)");
 
     REQUIRE(result.ApplicabilityResults.size() == 3);
     CHECK(result.ApplicabilityResults[0].Condition == g_pCondition);
@@ -194,6 +200,7 @@ TEST_CASE("Score::Result - Construct - Requirement - (Success)") {
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful);
     CHECK(Approx(result.Score) == NS::MaxScore);
+    CHECK(result.ToString() == "Result(1,1,100001.00)");
     CHECK(result.ApplicabilityResults.empty());
     REQUIRE(result.RequirementResults.size() == 1);
     CHECK(result.RequirementResults[0].Condition == g_pCondition);
@@ -213,6 +220,7 @@ TEST_CASE("Score::Result - Construct - Requirement - (Success & Success)") {
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful);
     CHECK(Approx(result.Score) == 75001.0f);
+    CHECK(result.ToString() == "Result(1,1,75001.00)");
     CHECK(result.ApplicabilityResults.empty());
 
     REQUIRE(result.RequirementResults.size() == 2);
@@ -239,6 +247,7 @@ TEST_CASE("Score::Result - Construct - Requirement - (Failure)") {
     // Note that the score isn't 0 because we didn't see any preference
     // failures.
     CHECK(Approx(result.Score) == 1.0f);
+    CHECK(result.ToString() == "Result(1,0,1.00)");
     CHECK(result.ApplicabilityResults.empty());
     REQUIRE(result.RequirementResults.size() == 1);
     CHECK(result.RequirementResults[0].Condition == g_pCondition);
@@ -258,6 +267,7 @@ TEST_CASE("Score::Result - Construct - Requirement - (Success & Failure)") {
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful == false);
     CHECK(Approx(result.Score) == 75001.0f);
+    CHECK(result.ToString() == "Result(1,0,75001.00)");
     CHECK(result.ApplicabilityResults.empty());
 
     REQUIRE(result.RequirementResults.size() == 2);
@@ -282,6 +292,7 @@ TEST_CASE("Score::Result - Construct - Requirement - (Failure & Success)") {
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful == false);
     CHECK(Approx(result.Score) == 20001.0f);
+    CHECK(result.ToString() == "Result(1,0,20001.00)");
     CHECK(result.ApplicabilityResults.empty());
 
     REQUIRE(result.RequirementResults.size() == 2);
@@ -307,6 +318,7 @@ TEST_CASE("Score::Result - Construct - Requirement - (Success & Success & Failur
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful == false);
     CHECK(Approx(result.Score) == 30001.0f);
+    CHECK(result.ToString() == "Result(1,0,30001.00)");
     CHECK(result.ApplicabilityResults.empty());
 
     REQUIRE(result.RequirementResults.size() == 3);
@@ -332,6 +344,7 @@ TEST_CASE("Score::Result - Construct - Preference - (Success)") {
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful);
     CHECK(Approx(result.Score) == NS::MaxScore);
+    CHECK(result.ToString() == "Result(1,1,100001.00)");
     CHECK(result.ApplicabilityResults.empty());
     CHECK(result.RequirementResults.empty());
 
@@ -352,6 +365,7 @@ TEST_CASE("Score::Result - Construct - Preference - (Success & Success)") {
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful);
     CHECK(Approx(result.Score) == 100000.75f);
+    CHECK(result.ToString() == "Result(1,1,100000.75)");
     CHECK(result.ApplicabilityResults.empty());
     CHECK(result.RequirementResults.empty());
 
@@ -373,9 +387,10 @@ TEST_CASE("Score::Result - Construct - Preference - (Failure)") {
 
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful);
+    CHECK(Approx(result.Score) == 100000.0f);
+    CHECK(result.ToString() == "Result(1,1,100000.00)");
     CHECK(result.RequirementResults.empty());
 
-    CHECK(Approx(result.Score) == 100000.0f);
     REQUIRE(result.PreferenceResults.size() == 1);
     CHECK(result.PreferenceResults[0].Condition == g_pCondition);
 }
@@ -393,6 +408,7 @@ TEST_CASE("Score::Result - Construct - Preference - (Success & Failure)") {
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful);
     CHECK(Approx(result.Score) == 100000.75f);
+    CHECK(result.ToString() == "Result(1,1,100000.75)");
     CHECK(result.ApplicabilityResults.empty());
     CHECK(result.RequirementResults.empty());
 
@@ -416,6 +432,7 @@ TEST_CASE("Score::Result - Construct - Preference - (Failure & Success)") {
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful);
     CHECK(Approx(result.Score) == 100000.203125f);
+    CHECK(result.ToString() == "Result(1,1,100000.20)");
     CHECK(result.ApplicabilityResults.empty());
     CHECK(result.RequirementResults.empty());
 
@@ -440,6 +457,7 @@ TEST_CASE("Score::Result - Construct - Preference - (Success & Success & Failure
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful);
     CHECK(Approx(result.Score) == 100000.296875f);
+    CHECK(result.ToString() == "Result(1,1,100000.30)");
     CHECK(result.ApplicabilityResults.empty());
     CHECK(result.RequirementResults.empty());
 
@@ -466,6 +484,7 @@ TEST_CASE("Score::Result - Construct - Requirement & Preference - (Success)") {
     CHECK(result.IsApplicable);
     CHECK(result.IsSuccessful);
     CHECK(Approx(result.Score) == 50000.3984375f);
+    CHECK(result.ToString() == "Result(1,1,50000.40)");
     CHECK(result.ApplicabilityResults.empty());
 
     REQUIRE(result.RequirementResults.size() == 1);
@@ -631,6 +650,8 @@ TEST_CASE("Score::ResultGroup - Construct - (Success)") {
     CHECK(group.NumFailures == 0);
     REQUIRE(group.Results.size() == 1);
     CHECK(group.Results[0]->IsSuccessful);
+
+    CHECK(group.ToString() == "ResultGroup(1,100001.00,1,0,1)");
 }
 
 TEST_CASE("Score::ResultGroup - Construct - (Success & Success)") {
@@ -650,6 +671,8 @@ TEST_CASE("Score::ResultGroup - Construct - (Success & Success)") {
     CHECK(Approx(group.Results[0]->Score) == 100001.0f);
     CHECK(group.Results[1]->IsSuccessful);
     CHECK(Approx(group.Results[1]->Score) == 50001.0f);
+
+    CHECK(group.ToString() == "ResultGroup(1,75001.00,2,0,2)");
 }
 
 TEST_CASE("Score::ResultGroup - Construct - (Success & Not Applicable & Success)") {
@@ -678,6 +701,8 @@ TEST_CASE("Score::ResultGroup - Construct - (Success & Not Applicable & Success)
     CHECK(group.Results[2]->IsApplicable);
     CHECK(group.Results[2]->IsSuccessful);
     CHECK(Approx(group.Results[2]->Score) == 50001.0f);
+
+    CHECK(group.ToString() == "ResultGroup(1,75001.00,2,0,3)");
 }
 
 TEST_CASE("Score::ResultGroup - Construct - (Not Applicable & Not Applicable)") {
@@ -689,7 +714,8 @@ TEST_CASE("Score::ResultGroup - Construct - (Not Applicable & Not Applicable)") 
     );
 
     CHECK(group.IsSuccessful);
-    CHECK(Approx(group.AverageScore) == 0.0f);
+
+    CHECK(Approx(group.AverageScore) == NS::MaxScore);
     CHECK(group.NumResults == 0);
     CHECK(group.NumFailures == 0);
 
@@ -700,6 +726,8 @@ TEST_CASE("Score::ResultGroup - Construct - (Not Applicable & Not Applicable)") 
 
     CHECK(group.Results[1]->IsApplicable == false);
     CHECK(group.Results[0]->IsSuccessful == false);
+
+    CHECK(group.ToString() == "ResultGroup(1,100001.00,0,0,2)");
 }
 
 TEST_CASE("Score::ResultGroup - Construct - (Failure)") {
@@ -717,6 +745,8 @@ TEST_CASE("Score::ResultGroup - Construct - (Failure)") {
     CHECK(group.NumFailures == 1);
     REQUIRE(group.Results.size() == 1);
     CHECK(group.Results[0]->IsSuccessful == false);
+
+    CHECK(group.ToString() == "ResultGroup(0,1.00,1,1,1)");
 }
 
 TEST_CASE("Score::ResultGroup - Construct - (Success & Failure)") {
@@ -737,6 +767,8 @@ TEST_CASE("Score::ResultGroup - Construct - (Success & Failure)") {
     REQUIRE(group.Results.size() == 2);
     CHECK(group.Results[0]->IsSuccessful);
     CHECK(group.Results[1]->IsSuccessful == false);
+
+    CHECK(group.ToString() == "ResultGroup(0,50001.00,2,1,2)");
 }
 
 TEST_CASE("Score::ResultGroup - Construct - (Failure & Success)") {
@@ -757,6 +789,8 @@ TEST_CASE("Score::ResultGroup - Construct - (Failure & Success)") {
     REQUIRE(group.Results.size() == 2);
     CHECK(group.Results[0]->IsSuccessful == false);
     CHECK(group.Results[1]->IsSuccessful);
+
+    CHECK(group.ToString() == "ResultGroup(0,25001.00,2,1,2)");
 }
 
 TEST_CASE("Score::ResultGroup - Compare") {
@@ -896,6 +930,7 @@ TEST_CASE("Score - Construct - Empty") {
 
     CHECK(score.IsSuccessful);
     CHECK(score.HasSuffix() == false);
+    CHECK(score.ToString() == "Score(Pending(1,100001.00,0,0))");
 }
 
 TEST_CASE("Score - Construct - Errors") {
@@ -933,6 +968,7 @@ TEST_CASE("Score - Construct - Single - (Success)") {
 
     CHECK(score.IsSuccessful);
     CHECK(score.HasSuffix());
+    CHECK(score.ToString() == "Score(Suffix(Result(1,1,100001.00),0),Pending(1,100001.00,1,0))");
 }
 
 TEST_CASE("Score - Construct - Single - (Failure)") {
@@ -940,6 +976,7 @@ TEST_CASE("Score - Construct - Single - (Failure)") {
 
     CHECK(score.IsSuccessful == false);
     CHECK(score.HasSuffix());
+    CHECK(score.ToString() == "Score(Suffix(Result(1,0,1.00),0),Pending(0,1.00,1,1))");
 }
 
 NS::Score CreateResultGroup(NS::Score score, std::vector<bool> results) {
@@ -964,6 +1001,7 @@ TEST_CASE("Score - Construct - Group/Single - (Success & Success)") {
 
     CHECK(score.IsSuccessful);
     CHECK(score.HasSuffix());
+    CHECK(score.ToString() == "Score([ResultGroup(1,100001.00,2,0,2)],Suffix(Result(1,1,100001.00),0),Pending(1,100001.00,1,0))");
 }
 
 TEST_CASE("Score - Construct - Group/Single - (Success & Failure)") {
@@ -978,6 +1016,7 @@ TEST_CASE("Score - Construct - Group/Single - (Success & Failure)") {
 
     CHECK(score.IsSuccessful == false);
     CHECK(score.HasSuffix());
+    CHECK(score.ToString() ==  "Score([ResultGroup(1,100001.00,2,0,2)],Suffix(Result(1,0,1.00),0),Pending(0,1.00,1,1))");
 }
 
 TEST_CASE("Score - Construct - Group/Single - (Failure & Success)") {
@@ -992,6 +1031,7 @@ TEST_CASE("Score - Construct - Group/Single - (Failure & Success)") {
 
     CHECK(score.IsSuccessful == false);
     CHECK(score.HasSuffix());
+    CHECK(score.ToString() == "Score([ResultGroup(0,1.00,1,1,1)],Suffix(Result(1,1,100001.00),0),Pending(1,100001.00,1,0))");
 }
 
 TEST_CASE("Score - Construct - Group/Single - (Failure & Failure)") {
@@ -1006,6 +1046,7 @@ TEST_CASE("Score - Construct - Group/Single - (Failure & Failure)") {
 
     CHECK(score.IsSuccessful == false);
     CHECK(score.HasSuffix());
+    CHECK(score.ToString() == "Score([ResultGroup(0,1.00,1,1,1)],Suffix(Result(1,0,1.00),0),Pending(0,1.00,1,1))");
 }
 
 TEST_CASE("Score - Enumeration") {

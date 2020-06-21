@@ -88,6 +88,9 @@ public:
 
     std::string ToString(void) const;
 
+    bool AtRoot(void) const;
+    size_t Depth(void) const;
+
     bool HasSuffix(void) const;
 
     template <typename FunctionT>

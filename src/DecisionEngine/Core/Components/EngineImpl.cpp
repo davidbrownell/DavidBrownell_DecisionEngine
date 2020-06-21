@@ -43,14 +43,13 @@ bool Sorter(SystemPtr const &p1, SystemPtr const &p2);
 // ----------------------------------------------------------------------
 // ----------------------------------------------------------------------
 // ----------------------------------------------------------------------
-SystemPtrs ExecuteRound(
+SystemPtrs ExecuteTask(
     Fingerprinter &fingerprinter,
     Observer &observer,
     size_t maxNumPendingSystems,
     size_t maxNumChildrenPerGeneration,
     size_t maxNumIterations,
     bool continueProcessingSystemWithFailures,
-    std::atomic<bool> const &isCancelled,
     WorkingSystemPtr pInitial,
     std::optional<std::tuple<ThreadPool &, DynamicScoreFunctor const &>> const &dynamicScoreInfo
 ) {
@@ -91,9 +90,6 @@ SystemPtrs ExecuteRound(
     SystemPtrs                              pending;
 
     for(size_t iteration = 0; iteration < maxNumIterations; ++iteration) {
-        if(isCancelled.load())
-            break;
-
         if(observer.OnBegin(iteration, maxNumIterations) == false)
             break;
 
@@ -282,7 +278,7 @@ std::tuple<SystemPtrs, SystemPtrsContainer> Merge(
                 );
         }
 
-        static SystemPtrs & FindGreatest(SystemPtrsContainer items, SystemPtrs const *pIgnore=nullptr) {
+        static SystemPtrs & FindGreatest(SystemPtrsContainer &items, SystemPtrs const *pIgnore=nullptr) {
             SystemPtrs *                    pGreatest(nullptr);
 
             for(SystemPtrs & potential : items) {
@@ -345,11 +341,11 @@ std::tuple<SystemPtrs, SystemPtrsContainer> Merge(
     }
 #endif // DEBUG
 
-    size_t                                  numSystemPtrsRemaining(std::accumulate(items.cbegin(), items.cend(), static_cast<size_t>(0), [](size_t total, SystemPtrs const &ptrs) { return total + ptrs.size(); }));
-    size_t                                  numSystemsRemaining(std::min(maxNumSystems, std::accumulate(items.cbegin(), items.cend(), static_cast<size_t>(0), [](size_t total, SystemPtrs const &ptrs) { return total + (ptrs.empty() ? 0 : 1); })));
+    size_t                                  numSystemPtrsRemaining(std::min(maxNumSystems, std::accumulate(items.cbegin(), items.cend(), static_cast<size_t>(0), [](size_t total, SystemPtrs const &ptrs) { return total + ptrs.size(); })));
+    size_t                                  numContainersRemaining(std::accumulate(items.cbegin(), items.cend(), static_cast<size_t>(0), [](size_t total, SystemPtrs const &ptrs) { return total + (ptrs.empty() ? 0 : 1); }));
 
     assert(numSystemPtrsRemaining);
-    assert(numSystemsRemaining);
+    assert(numContainersRemaining);
 
     SystemPtrs                              results;
     SystemPtrs *                            pGreatest(&Internal::FindGreatest(items));
@@ -362,12 +358,12 @@ std::tuple<SystemPtrs, SystemPtrsContainer> Merge(
         SystemPtrs &                        greatest(*pGreatest);
         SystemPtrs::const_iterator          iEndCopy(greatest.cbegin());
 
-        std::advance(iEndCopy, std::min(numSystemsRemaining, greatest.size()));
+        std::advance(iEndCopy, std::min(numSystemPtrsRemaining, greatest.size()));
 
         // If there are multiple containers remaining, find the container
         // that has the greatest value. No need to do this if there is only
         // 1 container remaining.
-        if(numSystemPtrsRemaining != 1) {
+        if(numContainersRemaining != 1) {
             pNextGreatest = &Internal::FindGreatest(items, &greatest);
 
             iEndCopy = std::upper_bound(
@@ -382,9 +378,9 @@ std::tuple<SystemPtrs, SystemPtrsContainer> Merge(
 
         assert(toCopy);
         assert(toCopy <= greatest.size());
-        assert(toCopy <= numSystemsRemaining);
+        assert(toCopy <= numSystemPtrsRemaining);
 
-        numSystemsRemaining -= toCopy;
+        numSystemPtrsRemaining -= toCopy;
 
         // Move the items from the results container
         for(SystemPtrs::iterator iter = greatest.begin(); iter != iEndCopy; ++iter)
@@ -394,7 +390,7 @@ std::tuple<SystemPtrs, SystemPtrsContainer> Merge(
         greatest.erase(greatest.begin(), iEndCopy);
 
         if(greatest.empty())
-            --numSystemPtrsRemaining;
+            --numContainersRemaining;
 
         if(pNextGreatest)
             pGreatest = pNextGreatest;
