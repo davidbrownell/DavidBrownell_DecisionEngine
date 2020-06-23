@@ -204,6 +204,8 @@ private:
         SERIALIZATION(PendingData, ARGS);
 
 #undef ARGS
+
+        std::string ToString(void) const;
     };
 
     /////////////////////////////////////////////////////////////////////////
@@ -238,6 +240,8 @@ private:
 
         Result Move(void);
         Result const & GetResult(void) const;
+
+        std::string ToString(void) const;
     };
 
     // ----------------------------------------------------------------------

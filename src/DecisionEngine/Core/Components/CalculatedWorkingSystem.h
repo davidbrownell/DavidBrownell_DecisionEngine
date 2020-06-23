@@ -44,6 +44,9 @@ public:
     // |  Public Types
     // |
     // ----------------------------------------------------------------------
+    using Index                             = DecisionEngine::Core::Components::Index;
+    using Score                             = DecisionEngine::Core::Components::Score;
+
     using WorkingSystemPtr                  = std::shared_ptr<WorkingSystem>;
 
     // ----------------------------------------------------------------------

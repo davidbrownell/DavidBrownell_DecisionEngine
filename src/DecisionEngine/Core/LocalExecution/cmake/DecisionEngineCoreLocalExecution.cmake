@@ -22,6 +22,8 @@ function(Impl)
             ${_this_path}/../Configuration.h
             ${_this_path}/../Engine.cpp
             ${_this_path}/../Engine.h
+            ${_this_path}/../FingerprinterFactory.cpp
+            ${_this_path}/../FingerprinterFactory.h
             ${_this_path}/../LocalExecution.h
 
         PRECOMPILED_HEADERS
