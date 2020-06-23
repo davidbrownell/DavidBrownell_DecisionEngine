@@ -169,7 +169,7 @@ class MyCondition : public Components::Condition {
 public:
     // ----------------------------------------------------------------------
     // |  Public Types
-    using IndexesType                       = std::vector<size_t>;
+    using IndexesType                       = std::vector<Components::Index::value_type>;
 
     // ----------------------------------------------------------------------
     // |  Public Data
@@ -469,11 +469,11 @@ public:
 
 SERIALIZATION_POLYMORPHIC_DECLARE_AND_DEFINE(Configuration);
 
-std::vector<size_t> GetIndexes(Components::ResultSystem const &resultParam) {
+std::vector<Components::Index::value_type> GetIndexes(Components::ResultSystem const &resultParam) {
     assert(dynamic_cast<MyResultSystem const *>(&resultParam));
 
     MyResultSystem const &                  result(static_cast<MyResultSystem const &>(resultParam));
-    std::vector<size_t>                     indexes;
+    std::vector<Components::Index::value_type>                     indexes;
 
     result.GetIndex().Enumerate(
         [&indexes](Components::Index::value_type value) {
@@ -500,7 +500,7 @@ TEST_CASE("Deterministic: 0 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{0});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -525,7 +525,7 @@ TEST_CASE("Deterministic: 0 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{0});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -558,7 +558,7 @@ TEST_CASE("Deterministic: 5 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -583,7 +583,7 @@ TEST_CASE("Deterministic: 5 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -615,7 +615,7 @@ TEST_CASE("Deterministic: 0 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{0});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -640,7 +640,7 @@ TEST_CASE("Deterministic: 0 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{0});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -672,7 +672,7 @@ TEST_CASE("Deterministic: 5 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -729,7 +729,7 @@ TEST_CASE("Deterministic: 5 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -796,7 +796,7 @@ TEST_CASE("Deterministic: 0,0 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0, 0});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{0, 0});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -829,7 +829,7 @@ TEST_CASE("Deterministic: 0,0 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0, 0});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{0, 0});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -868,7 +868,7 @@ TEST_CASE("Deterministic: 0,5 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0,5});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{0,5});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -901,7 +901,7 @@ TEST_CASE("Deterministic: 0,5 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0,5});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{0,5});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -941,7 +941,7 @@ TEST_CASE("Deterministic: 0,0 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0, 0});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{0, 0});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -974,7 +974,7 @@ TEST_CASE("Deterministic: 0,0 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0, 0});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{0, 0});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -1014,7 +1014,7 @@ TEST_CASE("Deterministic: 0,5 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0, 5});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{0, 5});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -1077,7 +1077,7 @@ TEST_CASE("Deterministic: 0,5 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0, 5});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{0, 5});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -1152,7 +1152,7 @@ TEST_CASE("Deterministic: 5,0 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 0});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 0});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -1185,7 +1185,7 @@ TEST_CASE("Deterministic: 5,0 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 0});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 0});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -1225,7 +1225,7 @@ TEST_CASE("Deterministic: 5,5 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5,5});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5,5});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -1258,7 +1258,7 @@ TEST_CASE("Deterministic: 5,5 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5,5});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5,5});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -1298,7 +1298,7 @@ TEST_CASE("Deterministic: 5,0 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 0});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 0});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -1361,7 +1361,7 @@ TEST_CASE("Deterministic: 5,0 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 0});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 0});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -1436,7 +1436,7 @@ TEST_CASE("Deterministic: 5,5 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 5});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 5});
 
         // This string is too big for MSVC
 #if (!defined _MSC_VER || defined __clang__)
@@ -1533,7 +1533,7 @@ TEST_CASE("Deterministic: 5,5 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 5});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 5});
         CHECK(
             observer.GetStrings() ==
             std::vector<std::string>{
@@ -1643,7 +1643,7 @@ TEST_CASE("Deterministic: 5,4,3,2,1 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 4, 3, 2, 1});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 4, 3, 2, 1});
     }
 
     SECTION("Mismatches are failures") {
@@ -1655,7 +1655,7 @@ TEST_CASE("Deterministic: 5,4,3,2,1 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 4, 3, 2, 1});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 4, 3, 2, 1});
     }
 }
 
@@ -1674,7 +1674,7 @@ TEST_CASE("Deterministic: 5,4,3,2,1 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 4, 3, 2, 1});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 4, 3, 2, 1});
     }
 
     SECTION("Mismatches are failures") {
@@ -1686,7 +1686,7 @@ TEST_CASE("Deterministic: 5,4,3,2,1 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 4, 3, 2, 1});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 4, 3, 2, 1});
     }
 }
 
@@ -1705,7 +1705,7 @@ TEST_CASE("Deterministic: 1,2,3,4,5,6,7 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{1, 2, 3, 4, 5, 6, 7});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{1, 2, 3, 4, 5, 6, 7});
     }
 
     SECTION("Mismatches are failures") {
@@ -1717,7 +1717,7 @@ TEST_CASE("Deterministic: 1,2,3,4,5,6,7 - 10 - 10") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{1, 2, 3, 4, 5, 6, 7});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{1, 2, 3, 4, 5, 6, 7});
     }
 }
 
@@ -1736,7 +1736,7 @@ TEST_CASE("Deterministic: 1,2,3,4,5,6,7 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{1, 2, 3, 4, 5, 6, 7});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{1, 2, 3, 4, 5, 6, 7});
     }
 
     SECTION("Mismatches are failures") {
@@ -1748,6 +1748,6 @@ TEST_CASE("Deterministic: 1,2,3,4,5,6,7 - 10 - 1") {
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<size_t>{1, 2, 3, 4, 5, 6, 7});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{1, 2, 3, 4, 5, 6, 7});
     }
 }
