@@ -20,6 +20,7 @@
 ///
 /////////////////////////////////////////////////////////////////////////
 #define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do this in one cpp file
+#define CATCH_CONFIG_ENABLE_BENCHMARKING
 #define CATCH_CONFIG_CONSOLE_WIDTH 200
 #include "../Engine.h"
 #include <catch.hpp>
@@ -1628,126 +1629,86 @@ TEST_CASE("Deterministic: 5,5 - 10 - 1") {
     }
 }
 
-TEST_CASE("Deterministic: 5,4,3,2,1 - 10 - 10") {
+void SmallDeterministicTest(size_t numGenerations, size_t childrenPerGeneration, bool failuresAreErrors) {
     LocalExecution::Engine::ExecuteResultValue          result;
     LocalExecution::Engine::ResultSystemUniquePtr       pResult;
-    Configuration                                       configuration(10, true);
+    Configuration                                       configuration(numGenerations, true);
     MyObserver                                          observer;
 
     SECTION("Mismatches are not failures") {
         std::tie(result, pResult) = LocalExecution::Engine::Execute(
             configuration,
             observer,
-            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{5, 4, 3, 2, 1}, false))
+            MyWorkingSystem(childrenPerGeneration, MyCondition::Create(MyCondition::IndexesType{5, 4, 3, 2, 1}, failuresAreErrors))
         );
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
         CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 4, 3, 2, 1});
     }
+}
 
-    SECTION("Mismatches are failures") {
+void MediumDeterministicTest(size_t numGenerations, size_t childrenPerGeneration, bool failuresAreErrors) {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(numGenerations, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
         std::tie(result, pResult) = LocalExecution::Engine::Execute(
             configuration,
             observer,
-            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{5, 4, 3, 2, 1}, true))
+            MyWorkingSystem(childrenPerGeneration, MyCondition::Create(MyCondition::IndexesType{1, 2, 3, 4, 5, 6, 7}, failuresAreErrors))
         );
 
         CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
         REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 4, 3, 2, 1});
+        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{1, 2, 3, 4, 5, 6, 7});
     }
+}
+
+#if (defined NDEBUG)
+
+TEST_CASE("Deterministic: 5,4,3,2,1 - 10 - 10", "[Benchmark]") {
+    BENCHMARK("Mismatches are not failures") { SmallDeterministicTest(10, 10, false); };
+    BENCHMARK("Mismatches are failures") { SmallDeterministicTest(10, 10, true); };
+}
+
+TEST_CASE("Deterministic: 5,4,3,2,1 - 10 - 1", "[Benchmark]") {
+    BENCHMARK("Mismatches are not failures") { SmallDeterministicTest(10, 1, false); };
+    BENCHMARK("Mismatches are failures") { SmallDeterministicTest(10, 1, true); };
+}
+
+TEST_CASE("Deterministic: 1,2,3,4,5,6,7 - 10 - 10", "[Benchmark]") {
+    BENCHMARK("Mismatches are not failures") { MediumDeterministicTest(10, 10, false); };
+    BENCHMARK("Mismatches are failures") { MediumDeterministicTest(10, 10, true); };
+}
+
+TEST_CASE("Deterministic: 1,2,3,4,5,6,7 - 10 - 1", "[Benchmark]") {
+    BENCHMARK("Mismatches are not failures") { MediumDeterministicTest(10, 1, false); };
+    BENCHMARK("Mismatches are failures") { MediumDeterministicTest(10, 1, true); };
+}
+
+#else
+
+TEST_CASE("Deterministic: 5,4,3,2,1 - 10 - 10") {
+    SECTION("Mismatches are not failures") { SmallDeterministicTest(10, 10, false); }
+    SECTION("Mismatches are failures") { SmallDeterministicTest(10, 10, true); }
 }
 
 TEST_CASE("Deterministic: 5,4,3,2,1 - 10 - 1") {
-    LocalExecution::Engine::ExecuteResultValue          result;
-    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
-    Configuration                                       configuration(10, true);
-    MyObserver                                          observer;
-
-    SECTION("Mismatches are not failures") {
-        std::tie(result, pResult) = LocalExecution::Engine::Execute(
-            configuration,
-            observer,
-            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{5, 4, 3, 2, 1}, false))
-        );
-
-        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
-        REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 4, 3, 2, 1});
-    }
-
-    SECTION("Mismatches are failures") {
-        std::tie(result, pResult) = LocalExecution::Engine::Execute(
-            configuration,
-            observer,
-            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{5, 4, 3, 2, 1}, true))
-        );
-
-        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
-        REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{5, 4, 3, 2, 1});
-    }
+    SECTION("Mismatches are not failures") { SmallDeterministicTest(10, 1, false); }
+    SECTION("Mismatches are failures") { SmallDeterministicTest(10, 1, true); }
 }
 
 TEST_CASE("Deterministic: 1,2,3,4,5,6,7 - 10 - 10") {
-    LocalExecution::Engine::ExecuteResultValue          result;
-    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
-    Configuration                                       configuration(10, true);
-    MyObserver                                          observer;
-
-    SECTION("Mismatches are not failures") {
-        std::tie(result, pResult) = LocalExecution::Engine::Execute(
-            configuration,
-            observer,
-            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{1, 2, 3, 4, 5, 6, 7}, false))
-        );
-
-        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
-        REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{1, 2, 3, 4, 5, 6, 7});
-    }
-
-    SECTION("Mismatches are failures") {
-        std::tie(result, pResult) = LocalExecution::Engine::Execute(
-            configuration,
-            observer,
-            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{1, 2, 3, 4, 5, 6, 7}, true))
-        );
-
-        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
-        REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{1, 2, 3, 4, 5, 6, 7});
-    }
+    SECTION("Mismatches are not failures") { MediumDeterministicTest(10, 10, false); }
+    SECTION("Mismatches are failures") { MediumDeterministicTest(10, 10, true); }
 }
 
 TEST_CASE("Deterministic: 1,2,3,4,5,6,7 - 10 - 1") {
-    LocalExecution::Engine::ExecuteResultValue          result;
-    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
-    Configuration                                       configuration(10, true);
-    MyObserver                                          observer;
-
-    SECTION("Mismatches are not failures") {
-        std::tie(result, pResult) = LocalExecution::Engine::Execute(
-            configuration,
-            observer,
-            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{1, 2, 3, 4, 5, 6, 7}, false))
-        );
-
-        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
-        REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{1, 2, 3, 4, 5, 6, 7});
-    }
-
-    SECTION("Mismatches are failures") {
-        std::tie(result, pResult) = LocalExecution::Engine::Execute(
-            configuration,
-            observer,
-            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{1, 2, 3, 4, 5, 6, 7}, true))
-        );
-
-        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
-        REQUIRE(pResult);
-        CHECK(GetIndexes(*pResult) == std::vector<Components::Index::value_type>{1, 2, 3, 4, 5, 6, 7});
-    }
+    SECTION("Mismatches are not failures") { MediumDeterministicTest(10, 1, false); }
+    SECTION("Mismatches are failures") { MediumDeterministicTest(10, 1, true); }
 }
+
+#endif
