@@ -63,9 +63,9 @@ public:
 
     // These values will not change, regardless of where the system is in terms of
     // completion.
-    size_t const                            NumConcurrentTasks;
     bool const                              ContinueProcessingSystemsWithFailures;
     bool const                              IsDeterministic;
+    boost::optional<size_t> const           NumConcurrentTasks;
 
     // ----------------------------------------------------------------------
     // |
@@ -73,16 +73,16 @@ public:
     // |
     // ----------------------------------------------------------------------
     Configuration(
-        size_t numConcurrentTasks,
         bool continueProcessingSystemsWithFailures,
-        bool isDeterministic
+        bool isDeterministic,
+        boost::optional<size_t> numConcurrentTasks=boost::none
     );
 
     virtual ~Configuration(void) = default;
 
     NON_COPYABLE(Configuration);
 
-#define ARGS                                MEMBERS(NumConcurrentTasks, ContinueProcessingSystemsWithFailures, IsDeterministic)
+#define ARGS                                MEMBERS(ContinueProcessingSystemsWithFailures, IsDeterministic, NumConcurrentTasks)
 
     MOVE(Configuration, ARGS);
     COMPARE(Configuration, ARGS);

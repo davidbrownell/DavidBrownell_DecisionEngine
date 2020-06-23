@@ -121,7 +121,14 @@ Score::Result::Result(
     assert(Score <= MaxScore);
 }
 
-// TODO std::string Score::Result::ToString(void) const;
+std::string Score::Result::ToString(void) const {
+    return boost::str(
+        boost::format("Result(%d,%d,%.02f)")
+            % IsApplicable
+            % IsSuccessful
+            % Score
+    );
+}
 
 // ----------------------------------------------------------------------
 // |
@@ -152,7 +159,7 @@ auto ConstructResultGroupTuple(Score::ResultGroup::ResultPtrs results) {
     return std::make_tuple(
         std::move(results),
         numFailures == 0,
-        numResults ? totalScore / static_cast<float>(numResults) : totalScore,
+        numResults ? totalScore / static_cast<float>(numResults) : MaxScore,
         numResults,
         numFailures
     );
@@ -203,7 +210,16 @@ bool Score::ResultGroup::operator>=(ResultGroup const &other) const {
     return Compare(*this, other) >= 0;
 }
 
-// TODO std::string Score::ResultGroup::ToString(void) const;
+std::string Score::ResultGroup::ToString(void) const {
+    return boost::str(
+        boost::format("ResultGroup(%d,%.02f,%d,%d,%d)")
+            % IsSuccessful
+            % AverageScore
+            % NumResults
+            % NumFailures
+            % Results.size()
+    );
+}
 
 // ----------------------------------------------------------------------
 // ----------------------------------------------------------------------
@@ -276,7 +292,7 @@ Score::PendingData::PendingData(ResultPtrs const *pOptionalResults, Result const
     if(pOptionalResult)
         processResultsFunc(*pOptionalResult);
 
-    float                                   averageScore(numResults ? totalScore / static_cast<float>(numResults) : totalScore);
+    float                                   averageScore(numResults ? totalScore / static_cast<float>(numResults) : MaxScore);
 
     assert(averageScore >= 0.0f && averageScore <= MaxScore);
 
@@ -284,6 +300,16 @@ Score::PendingData::PendingData(ResultPtrs const *pOptionalResults, Result const
     make_mutable(AverageScore) = std::move(averageScore);
     make_mutable(NumResults) = std::move(numResults);
     make_mutable(NumFailures) = std::move(numFailures);
+}
+
+std::string Score::PendingData::ToString(void) const {
+    return boost::str(
+        boost::format("Pending(%d,%.02f,%d,%d)")
+            % IsSuccessful
+            % AverageScore
+            % NumResults
+            % NumFailures
+    );
 }
 
 // ----------------------------------------------------------------------
@@ -312,6 +338,14 @@ Score::Result const & Score::SuffixInfo::GetResult(void) const {
         throw std::logic_error("invalid operation");
 
     return _result;
+}
+
+std::string Score::SuffixInfo::ToString(void) const {
+    return boost::str(
+        boost::format("Suffix(%s,%d)")
+            % _result.ToString()
+            % CompletesGroup
+    );
 }
 
 // ----------------------------------------------------------------------
@@ -459,7 +493,44 @@ bool Score::operator>=(Score const &other) const {
     return Compare(*this, other) >= 0;
 }
 
-// TODO std::string Score::ToString(void) const;
+std::string Score::ToString(void) const /*override*/ {
+    std::vector<std::string>                strings;
+
+    if(_pResultGroups) {
+        std::vector<std::string>            resultGroups;
+
+        for(ResultGroupPtr const &pResultGroup : *_pResultGroups)
+            resultGroups.emplace_back(pResultGroup->ToString());
+
+        strings.emplace_back(
+            boost::str(
+                boost::format("[%1%]") % boost::algorithm::join(resultGroups, ",")
+            )
+        );
+    }
+
+    if(_pResults) {
+        std::vector<std::string>            results;
+
+        for(ResultPtr const &pResult : *_pResults)
+            results.emplace_back(pResult->ToString());
+
+        strings.emplace_back(
+            boost::str(
+                boost::format("[%1%]") % boost::algorithm::join(results, ",")
+            )
+        );
+    }
+
+    if(_suffix)
+        strings.emplace_back(_suffix->ToString());
+
+    strings.emplace_back(_pendingData.ToString());
+
+    return boost::str(
+        boost::format("Score(%1%)") % boost::algorithm::join(strings, ",")
+    );
+}
 
 bool Score::HasSuffix(void) const {
     return static_cast<bool>(_suffix);

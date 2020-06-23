@@ -148,7 +148,38 @@ bool Index::operator>=(Index const &other) const {
     return Compare(*this, other) >= 0;
 }
 
-// TODO std::string ToString(void) const;
+std::string Index::ToString(void) const /*override*/ {
+    std::vector<std::string>                strings;
+
+    if(_pIndexes) {
+        for(auto const &index : *_pIndexes)
+            strings.emplace_back(std::to_string(index));
+    }
+
+    if(_suffix) {
+        strings.emplace_back(
+            boost::str(
+                boost::format("(%1%)") % *_suffix
+            )
+        );
+    }
+
+    return boost::str(
+        boost::format(
+            "Index(%1%)"
+        )
+        % boost::algorithm::join(strings, ",")
+    );
+}
+
+bool Index::AtRoot(void) const {
+    return !_pIndexes && !_suffix;
+}
+
+size_t Index::Depth(void) const {
+    return (_pIndexes ? _pIndexes->size() : 0)
+        + (_suffix ? 1 : 0);
+}
 
 bool Index::HasSuffix(void) const {
     return static_cast<bool>(_suffix);

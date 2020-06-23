@@ -24,6 +24,8 @@ function(Impl)
         FILES
             ${_this_path}/Configuration_UnitTest.cpp
             ${_this_path}/Engine_UnitTest.cpp
+            ${_this_path}/FingerprinterFactory_UnitTest.cpp
+            ${_this_path}/LocalExecution_UnitTest.cpp
 
         PRECOMPILED_LIBRARY_HEADERS
             DecisionEngineCoreLocalExecution

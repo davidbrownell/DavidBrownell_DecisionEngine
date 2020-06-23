@@ -33,20 +33,20 @@ namespace LocalExecution {
 // |
 // ----------------------------------------------------------------------
 Configuration::Configuration(
-    size_t numConcurrentTasks,
     bool continueProcessingSystemsWithFailures,
-    bool isDeterministic
+    bool isDeterministic,
+    boost::optional<size_t> numConcurrentTasks/*=boost::none*/
 ) :
+    ContinueProcessingSystemsWithFailures(std::move(continueProcessingSystemsWithFailures)),
+    IsDeterministic(std::move(isDeterministic)),
     NumConcurrentTasks(
         std::move(
-            [&numConcurrentTasks](void) -> size_t & {
-                ENSURE_ARGUMENT(numConcurrentTasks);
+            [&numConcurrentTasks](void) -> boost::optional<size_t> & {
+                ENSURE_ARGUMENT(numConcurrentTasks, !numConcurrentTasks || *numConcurrentTasks);
                 return numConcurrentTasks;
             }()
         )
-    ),
-    ContinueProcessingSystemsWithFailures(std::move(continueProcessingSystemsWithFailures)),
-    IsDeterministic(std::move(isDeterministic))
+    )
 {}
 
 // virtual

@@ -64,44 +64,54 @@ public:
 SERIALIZATION_POLYMORPHIC_DECLARE_AND_DEFINE(MyConfiguration);
 
 TEST_CASE("Construct") {
-    MyConfiguration const                   config(10, true, false);
+    {
+        MyConfiguration const                   config(true, false, 10);
 
-    CHECK(config.NumConcurrentTasks == 10);
-    CHECK(config.ContinueProcessingSystemsWithFailures);
-    CHECK(config.IsDeterministic == false);
+        CHECK(config.ContinueProcessingSystemsWithFailures);
+        CHECK(config.IsDeterministic == false);
+        CHECK((config.NumConcurrentTasks && *config.NumConcurrentTasks == 10));
+    }
+
+    {
+        MyConfiguration const                   config(true, false);
+
+        CHECK(config.ContinueProcessingSystemsWithFailures);
+        CHECK(config.IsDeterministic == false);
+        CHECK(!config.NumConcurrentTasks);
+    }
 }
 
 TEST_CASE("Construct - Errors") {
-    CHECK_THROWS_MATCHES(MyConfiguration(0, true, true), std::invalid_argument, Catch::Matchers::Exception::ExceptionMessageMatcher("numConcurrentTasks"));
+    CHECK_THROWS_MATCHES(MyConfiguration(true, true, 0), std::invalid_argument, Catch::Matchers::Exception::ExceptionMessageMatcher("numConcurrentTasks"));
 }
 
 TEST_CASE("Compare") {
     CHECK(
         CommonHelpers::TestHelpers::CompareTest(
-            MyConfiguration(10, true, false),
-            MyConfiguration(10, true, false),
+            MyConfiguration(true, false, 10),
+            MyConfiguration(true, false, 10),
             true
         ) == 0
     );
 
     CHECK(
         CommonHelpers::TestHelpers::CompareTest(
-            MyConfiguration(1, true, true),
-            MyConfiguration(2, true, true)
+            MyConfiguration(false, true, 1),
+            MyConfiguration(true, true, 1)
         ) == 0
     );
 
     CHECK(
         CommonHelpers::TestHelpers::CompareTest(
-            MyConfiguration(1, false, true),
-            MyConfiguration(1, true, true)
+            MyConfiguration(true, false, 1),
+            MyConfiguration(true, true, 1)
         ) == 0
     );
 
     CHECK(
         CommonHelpers::TestHelpers::CompareTest(
-            MyConfiguration(1, true, false),
-            MyConfiguration(1, true, true)
+            MyConfiguration(true, true, 1),
+            MyConfiguration(true, true, 2)
         ) == 0
     );
 }
@@ -109,7 +119,7 @@ TEST_CASE("Compare") {
 TEST_CASE("Serialization") {
     CHECK(
         BoostHelpers::TestHelpers::SerializeTest(
-            MyConfiguration(1, true, true),
+            MyConfiguration(true, true, 1),
             [](std::string const &value) {
                 UNSCOPED_INFO(value);
                 CHECK(true);
