@@ -49,43 +49,100 @@ SystemPtrs ExecuteTask(
     size_t maxNumPendingSystems,
     size_t maxNumChildrenPerGeneration,
     size_t maxNumIterations,
-    bool continueProcessingSystemWithFailures,
+    bool continueProcessingSystemsWithFailures,
     WorkingSystemPtr pInitial,
     std::optional<std::tuple<ThreadPool &, DynamicScoreFunctor const &>> const &dynamicScoreInfo
 ) {
-    // ----------------------------------------------------------------------
-    struct Internal {
-        static bool ProcessResultSystem(
-            Fingerprinter &fingerprinter,
-            Observer &observer,
-            size_t iteration,
-            size_t maxNumIterations,
-            System &system
-        ) {
-            assert(system.Type == System::TypeValue::Result);
-            assert(dynamic_cast<CalculatedResultSystem *>(&system));
-
-            CalculatedResultSystem &        result(static_cast<CalculatedResultSystem &>(system));
-
-            if(fingerprinter.ShouldProcess(result) == false)
-                return true;
-
-            CalculatedResultSystem::ResultSystemUniquePtr                   pResult(result.Commit());
-
-            assert(pResult);
-
-            if(fingerprinter.ShouldProcess(*pResult) == false)
-                return true;
-
-            return observer.OnResultSystem(iteration, maxNumIterations, std::move(pResult));
-        }
-    };
-    // ----------------------------------------------------------------------
-
     ENSURE_ARGUMENT(maxNumPendingSystems);
     ENSURE_ARGUMENT(maxNumChildrenPerGeneration);
     ENSURE_ARGUMENT(maxNumIterations);
     ENSURE_ARGUMENT(pInitial);
+
+    auto const                              processResultsAndFailuresFunc(
+        [
+            &fingerprinter,
+            &observer,
+            maxNumIterations,
+            continueProcessingSystemsWithFailures
+        ](size_t iteration, SystemPtrs &systems) {
+            // Remove all of the failures at the end of the queue
+            if(
+                continueProcessingSystemsWithFailures == false
+                && systems.empty() == false
+                && (*systems.crbegin())->GetScore().IsSuccessful == false
+            ) {
+                // If here, we know that the last system failed. Find the first
+                // system that failed so that we can call the observer with them
+                // all at the same time.
+
+                // It would be nice to use a binary search here, but we don't have a full
+                // key to use for comparison (which is required for a stable sort).
+                SystemPtrs::const_reverse_iterator      iter(systems.crbegin() + 1);
+
+                while(iter != systems.crend() && (*iter)->GetScore().IsSuccessful == false)
+                    ++iter;
+
+                // Convert the reverse iterator into a forward iterator
+                SystemPtrs::const_iterator const        iFirstFailure(systems.cend() - std::distance(systems.crbegin(), iter));
+
+                assert(std::all_of(systems.cbegin(), iFirstFailure, [](SystemPtr const &ptr) { return ptr->GetScore().IsSuccessful; }));
+                assert(std::all_of(iFirstFailure, systems.cend(), [](SystemPtr const &ptr) { return ptr->GetScore().IsSuccessful == false; }));
+
+                bool const                  shouldContinue(
+                    observer.OnFailedSystems(
+                        iteration,
+                        maxNumIterations,
+                        iFirstFailure,
+                        systems.cend()
+                    )
+                );
+
+                systems.erase(iFirstFailure, systems.end());
+
+                if(shouldContinue == false)
+                    return false;
+            }
+
+            // Remove the results at the beginning of the queue
+            if(systems.empty() == false && (*systems.cbegin())->Type == System::TypeValue::Result) {
+                SystemPtrs::iterator        iter(systems.begin() + 1);
+
+                while(iter != systems.end() && (*iter)->Type == System::TypeValue::Result)
+                    ++iter;
+
+                SystemPtrs::iterator const              iEnd(iter);
+                Observer::ResultSystemUniquePtrs        results;
+
+                for(iter = systems.begin(); iter != iEnd; ++iter) {
+                    assert(dynamic_cast<CalculatedResultSystem *>((*iter).get()));
+                    CalculatedResultSystem &            result(static_cast<CalculatedResultSystem &>(**iter));
+
+                    if(fingerprinter.ShouldProcess(result) == false)
+                        continue;
+
+                    Observer::ResultSystemUniquePtr     pResult(result.Commit());
+
+                    assert(pResult);
+
+                    if(fingerprinter.ShouldProcess(*pResult) == false)
+                        continue;
+
+                    results.emplace_back(std::move(pResult));
+                }
+
+                systems.erase(systems.begin(), iEnd);
+
+                if(results.empty() == false)
+                    return observer.OnSuccessfulSystems(
+                        iteration,
+                        maxNumIterations,
+                        std::move(results)
+                    );
+            }
+
+            return true;
+        }
+    );
 
     SystemPtrs                              pending;
 
@@ -97,21 +154,15 @@ SystemPtrs ExecuteTask(
 
         // Get the initial WorkingSystem
         while(!pInitial && pending.empty() == false) {
+            if(processResultsAndFailuresFunc(iteration, pending) == false)
+                break;
+
+            if(pending.empty())
+                continue;
+
             System &                        system(**pending.begin());
 
-            if(system.Type == System::TypeValue::Result) {
-                if(
-                    Internal::ProcessResultSystem(
-                        fingerprinter,
-                        observer,
-                        iteration,
-                        maxNumIterations,
-                        system
-                    ) == false
-                )
-                    break;
-            }
-            else if(system.Type == System::TypeValue::Working) {
+            if(system.Type == System::TypeValue::Working) {
                 if(system.Completion == System::CompletionValue::Concrete) {
                     assert(std::dynamic_pointer_cast<WorkingSystem>(*pending.begin()));
                     pInitial = std::static_pointer_cast<WorkingSystem>(*pending.begin());
@@ -145,91 +196,36 @@ SystemPtrs ExecuteTask(
 
         SystemPtrs                          generated(pInitial->GenerateChildren(maxNumChildrenPerGeneration));
 
-        {
-            FINALLY([&observer, &iteration, &maxNumIterations, &pInitial, &generated](void) { observer.OnGeneratedWork(iteration, maxNumIterations, *pInitial, generated); });
+        assert(generated.empty() == false);
+        assert(generated.size() <= maxNumChildrenPerGeneration);
 
-            assert(generated.empty() == false);
-            assert(generated.size() <= maxNumChildrenPerGeneration);
+        observer.OnGeneratedWork(iteration, maxNumIterations, *pInitial, generated);
 
-            if(pInitial->IsComplete() == false)
-                generated.emplace_back(pInitial);
+        if(pInitial->IsComplete() == false)
+            generated.emplace_back(pInitial);
 
-            std::sort(generated.begin(), generated.end(), Sorter);
+        std::sort(generated.begin(), generated.end(), Sorter);
 
-            // Remove the ResultSystems that are at the front of the sorted queue (if any)
-            bool                            should_continue(true);
+        // Process systems and failures
+        if(processResultsAndFailuresFunc(iteration, generated) == false)
+            break;
 
-            while(generated.empty() == false && (*generated.cbegin())->Type == System::TypeValue::Result) {
-                if(
-                    Internal::ProcessResultSystem(
-                        fingerprinter,
-                        observer,
-                        iteration,
-                        maxNumIterations,
-                        **generated.begin()
-                    )
-                ) {
-                    should_continue = false;
-                    break;
-                }
+        if(generated.empty())
+            continue;
 
-                generated.pop_front();
+        // Remove by fingerprinter
+        if(dynamic_cast<NoopFingerprinter *>(&fingerprinter) == nullptr) {
+            SystemPtrs::const_iterator  iter(generated.begin());
+
+            while(iter != generated.end()) {
+                if(fingerprinter.ShouldProcess(**iter) == false)
+                    iter = generated.erase(iter);
+                else
+                    ++iter;
             }
-
-            if(should_continue == false)
-                break;
 
             if(generated.empty())
                 continue;
-
-            // Remove all generated work that has failed (if necessary)
-            if(continueProcessingSystemWithFailures == false && (*generated.crbegin())->GetScore().IsSuccessful == false) {
-                // If here, we know that the last generated system failed. Find
-                // the first system that failed so that we can call the observer
-                // with them all at the same time.
-
-                // It would be nice to use a binary search here, but we don't have a full
-                // key to use for comparison (which is required for a stable sort).
-                SystemPtrs::const_reverse_iterator      iter(generated.crbegin() + 1);
-
-                while(iter != generated.crend() && (*iter)->GetScore().IsSuccessful == false)
-                    ++iter;
-
-                // Convert the reverse iterator into a forward iterator
-                SystemPtrs::const_iterator const        iFirstFailure(generated.cend() - std::distance(generated.crbegin(), iter));
-
-                assert(iFirstFailure != generated.cbegin());
-                assert(std::all_of(generated.cbegin(), iFirstFailure, [](SystemPtr const &ptr) { return ptr->GetScore().IsSuccessful; }));
-                assert(std::all_of(iFirstFailure, generated.cend(), [](SystemPtr const &ptr) { return ptr->GetScore().IsSuccessful == false; }));
-
-                observer.OnFailedSystems(
-                    iteration,
-                    maxNumIterations,
-                    *pInitial,
-                    iFirstFailure,
-                    generated.cend()
-                );
-
-                generated.erase(iFirstFailure, generated.cend());
-
-                if(generated.empty())
-                    continue;
-            }
-
-            // Remove by fingerprinter
-            if(dynamic_cast<NoopFingerprinter *>(&fingerprinter) == nullptr) {
-                SystemPtrs::const_iterator  iter(generated.begin());
-
-                while(iter != generated.end()) {
-                    if(fingerprinter.ShouldProcess(**iter) == false)
-                        iter = generated.erase(iter);
-                    else
-                        ++iter;
-                }
-
-                if(generated.empty())
-                    continue;
-            }
         }
 
         // Merge the generated work with the pending work

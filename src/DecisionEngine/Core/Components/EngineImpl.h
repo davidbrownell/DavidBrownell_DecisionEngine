@@ -63,6 +63,7 @@ public:
     using SystemPtrsContainer               = DecisionEngine::Core::Components::EngineImpl::SystemPtrsContainer;
 
     using ResultSystemUniquePtr             = DecisionEngine::Core::Components::EngineImpl::ResultSystemUniquePtr;
+    using ResultSystemUniquePtrs            = std::vector<ResultSystemUniquePtr>;
 
     // ----------------------------------------------------------------------
     // |  Public Methods
@@ -71,15 +72,14 @@ public:
     virtual bool OnBegin(size_t iteration, size_t maxIterations) = 0;
     virtual void OnEnd(size_t iteration, size_t maxIterations) = 0;
 
-    virtual bool OnResultSystem(size_t iteration, size_t maxIterations, ResultSystemUniquePtr pResult) = 0;
-
     virtual bool OnGeneratingWork(size_t iteration, size_t maxIterations, WorkingSystem const &active) = 0;
     virtual void OnGeneratedWork(size_t iteration, size_t maxIterations, WorkingSystem const &active, SystemPtrs const &generated) = 0;
 
     virtual bool OnMergingWork(size_t iteration, size_t maxIterations, WorkingSystem const &active, SystemPtrs const &generated, SystemPtrs const &pending) = 0;
     virtual void OnMergedWork(size_t iteration, size_t maxIterations, WorkingSystem const &active, SystemPtrs const &pending, SystemPtrsContainer removed) = 0;
 
-    virtual void OnFailedSystems(size_t iteration, size_t maxIterations, WorkingSystem const &active, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) = 0;
+    virtual bool OnFailedSystems(size_t iteration, size_t maxIterations, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) = 0;
+    virtual bool OnSuccessfulSystems(size_t iteration, size_t maxIterations, ResultSystemUniquePtrs results) = 0;
 };
 
 /////////////////////////////////////////////////////////////////////////

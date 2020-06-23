@@ -26,8 +26,7 @@
 
 #include <DecisionEngine/Core/Components/Condition.h>
 
-#include <boost/algorithm/string/join.hpp>
-#include <boost/format.hpp>
+#include <boost/algorithm/string/replace.hpp>
 
 namespace Components                        = DecisionEngine::Core::Components;
 namespace LocalExecution                    = DecisionEngine::Core::LocalExecution;
@@ -46,6 +45,12 @@ public:
     std::vector<std::string> const & GetStrings(bool sort=true) {
         if(sort)
             std::sort(_strings.begin(), _strings.end());
+
+        // Replace size_t::max with -1 for consistency across x64 and x86
+        std::string const                   maxValue(std::to_string(std::numeric_limits<size_t>::max()));
+
+        for(std::string &str : _strings)
+            boost::algorithm::replace_all(str, maxValue, "-1");
 
         return _strings;
     }
@@ -108,8 +113,9 @@ public:
         AddString(boost::format("OnIterationMergedWork: %1%, %2%, %3%, %4%, %5%, %6%, %7%, %8%") % round % task % numTasks % iteration % numIterations % ToString("active ", active) % ToString("pending ", pending) % ToString("removed ", removed));
     }
 
-    void OnIterationFailedSystems(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, WorkingSystem const &active, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) override {
-        AddString(boost::format("OnIterationFailedSystems: %1%, %2%, %3%, %4%, %5%, %6%, %7%") % round % task % numTasks % iteration % numIterations % ToString("active ", active) % std::distance(begin, end));
+    bool OnIterationFailedSystems(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) override {
+        AddString(boost::format("OnIterationFailedSystems: %1%, %2%, %3%, %4%, %5%, %6%") % round % task % numTasks % iteration % numIterations % std::distance(begin, end));
+        return true;
     }
 
 private:
@@ -199,20 +205,21 @@ public:
 
     Result Apply(Components::Index const &index) const {
         IndexesType::const_iterator         iter(Indexes.begin());
+        bool const                          enumeratedAll(
+            index.Enumerate(
+                [this, &iter](Components::Index::value_type value) {
+                    if(value != *iter)
+                        return false;
 
-        index.Enumerate(
-            [this, &iter](Components::Index::value_type value) {
-                if(value != *iter)
-                    return false;
-
-                ++iter;
-                return iter != Indexes.end();
-            }
+                    ++iter;
+                    return iter != Indexes.end();
+                }
+            )
         );
 
         float                               ratio(
-            [this, &iter](void) {
-                if(iter == Indexes.end())
+            [this, &iter, &enumeratedAll](void) {
+                if(enumeratedAll || iter == Indexes.end())
                     return 1.0f;
 
                 if(Indexes.size() == 1)
@@ -304,31 +311,33 @@ public:
 
     // ----------------------------------------------------------------------
     // |  Public Data
-    size_t const                            MaxNumChildren;
+    size_t const                            ChildrenPerIteration;
+    size_t const                            ChildrenToGenerate;
     MyConditionPtr const                    Condition;
 
     // ----------------------------------------------------------------------
     // |  Public Methods
-    MyWorkingSystem(size_t maxNumChildren, MyConditionPtr pCondition) :
+    MyWorkingSystem(size_t childrenPerIteration, MyConditionPtr pCondition) :
         MyWorkingSystem(
-            std::move(maxNumChildren),
+            std::move(childrenPerIteration),
             std::move(pCondition),
             Components::Score(),
             Components::Index()
         )
     {}
 
-    MyWorkingSystem(size_t maxNumChildren, MyConditionPtr pCondition, Components::Score score, Components::Index index) :
+    MyWorkingSystem(size_t childrenPerIteration, MyConditionPtr pCondition, Components::Score score, Components::Index index) :
         Components::WorkingSystem(std::move(score), std::move(index)),
         _childIndex(0),
-        MaxNumChildren(
+        ChildrenPerIteration(
             std::move(
-                [&maxNumChildren](void) -> size_t & {
-                    ENSURE_ARGUMENT(maxNumChildren);
-                    return maxNumChildren;
+                [&childrenPerIteration](void) -> size_t & {
+                    ENSURE_ARGUMENT(childrenPerIteration);
+                    return childrenPerIteration;
                 }()
             )
         ),
+        ChildrenToGenerate(10),
         Condition(
             std::move(
                 [&pCondition](void) -> MyConditionPtr & {
@@ -339,7 +348,7 @@ public:
         )
     {}
 
-#define ARGS                                MEMBERS(_childIndex, MaxNumChildren, Condition), BASES(Components::WorkingSystem)
+#define ARGS                                MEMBERS(_childIndex, ChildrenPerIteration, ChildrenToGenerate, Condition), BASES(Components::WorkingSystem)
 
     NON_COPYABLE(MyWorkingSystem);
     MOVE(MyWorkingSystem, ARGS);
@@ -357,7 +366,7 @@ public:
     }
 
     bool IsComplete(void) const override {
-        return _childIndex == MaxNumChildren;
+        return _childIndex == ChildrenToGenerate;
     }
 
 private:
@@ -368,7 +377,7 @@ private:
         using CreateSystemFunc              = std::function<LocalExecution::Engine::SystemPtr (Components::Score, Components::Index)>;
         // ----------------------------------------------------------------------
 
-        size_t                              toGenerate(std::min(MaxNumChildren -_childIndex, maxNumChildren));
+        size_t                              toGenerate(std::min(std::min(ChildrenPerIteration, ChildrenToGenerate -_childIndex), maxNumChildren));
 
         assert(toGenerate);
 
@@ -385,7 +394,7 @@ private:
                 return
                     [this](Components::Score score, Components::Index index) -> LocalExecution::Engine::SystemPtr {
                         return std::make_shared<MyWorkingSystem>(
-                            MaxNumChildren,
+                            ChildrenPerIteration,
                             Condition,
                             std::move(score).Commit(),
                             std::move(index).Commit()
@@ -397,13 +406,10 @@ private:
         SystemPtrs                          results;
 
         while(toGenerate--) {
-            results.emplace_back(
-                createSystemFunc(
-                    Components::Score(GetScore(), Condition->Apply(GetIndex()), isFinal),
-                    Components::Index(GetIndex(), _childIndex)
-                )
-            );
+            Components::Index               newIndex(GetIndex(), _childIndex);
+            Components::Score               newScore(GetScore(), Condition->Apply(newIndex), isFinal);
 
+            results.emplace_back(createSystemFunc(std::move(newScore), std::move(newIndex)));
             ++_childIndex;
         }
 
@@ -424,12 +430,11 @@ public:
     // |  Public Methods
     Configuration(
         size_t maxNumChildrenPerGeneration,
-        bool continueProcessingSystemsWithFailures,
         bool isDeterministic,
         boost::optional<size_t> numConcurrentTasks=boost::none
     ) :
         LocalExecution::Configuration(
-            std::move(continueProcessingSystemsWithFailures),
+            false,
             std::move(isDeterministic),
             std::move(numConcurrentTasks)
         ),
@@ -480,74 +485,1269 @@ std::vector<size_t> GetIndexes(Components::ResultSystem const &resultParam) {
     return indexes;
 }
 
-TEST_CASE("0 - 10 - 10") {
+TEST_CASE("Deterministic: 0 - 10 - 10") {
     LocalExecution::Engine::ExecuteResultValue          result;
     LocalExecution::Engine::ResultSystemUniquePtr       pResult;
-    Configuration                                       configuration(
-        10,
-        true,
-        true
-    );
-
+    Configuration                                       configuration(10, true);
     MyObserver                                          observer;
 
-    std::tie(result, pResult) = LocalExecution::Engine::Execute(
-        configuration,
-        observer,
-        MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{0}, false))
-    );
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{0}, false))
+        );
 
-    CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
-    CHECK(GetIndexes(*pResult) == std::vector<size_t>{0});
-    CHECK(
-        observer.GetStrings() ==
-        std::vector<std::string>{
-            "OnIterationBegin: 0, 0, 1, 0, 18446744073709551615",
-            "OnIterationBegin: 0, 0, 1, 1, 18446744073709551615",
-            "OnIterationEnd: 0, 0, 1, 0, 18446744073709551615",
-            "OnIterationEnd: 0, 0, 1, 1, 18446744073709551615",
-            "OnIterationGeneratedWork: 0, 0, 1, 0, 18446744073709551615, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated []",
-            "OnIterationGeneratingWork: 0, 0, 1, 0, 18446744073709551615, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
-            "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
-            "OnRoundEnd: 0, pending []",
-            "OnTaskBegin: 0, 0, 1",
-            "OnTaskEnd: 0, 0, 1"
-        }
-    );
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((2))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((3))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((4))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((5))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((6))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((7))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((8))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((9)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending []",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{0}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationFailedSystems: 0, 0, 1, 0, -1, 9",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((1))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((2))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((3))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((4))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((5))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((6))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((7))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((8))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((9)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending []",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
 }
 
-TEST_CASE("5 - 10 - 10") {
+TEST_CASE("Deterministic: 5 - 10 - 10") {
     LocalExecution::Engine::ExecuteResultValue          result;
     LocalExecution::Engine::ResultSystemUniquePtr       pResult;
-    Configuration                                       configuration(
-        10,
-        true,
-        true
-    );
-
+    Configuration                                       configuration(10, true);
     MyObserver                                          observer;
 
-    std::tie(result, pResult) = LocalExecution::Engine::Execute(
-        configuration,
-        observer,
-        MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{5}, false))
-    );
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{5}, false))
+        );
 
-    CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
-    CHECK(GetIndexes(*pResult) == std::vector<size_t>{5});
-    CHECK(
-        observer.GetStrings() ==
-        std::vector<std::string>{
-            "OnIterationBegin: 0, 0, 1, 0, 18446744073709551615",
-            "OnIterationBegin: 0, 0, 1, 1, 18446744073709551615",
-            "OnIterationEnd: 0, 0, 1, 0, 18446744073709551615",
-            "OnIterationEnd: 0, 0, 1, 1, 18446744073709551615",
-            "OnIterationGeneratedWork: 0, 0, 1, 0, 18446744073709551615, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated []",
-            "OnIterationGeneratingWork: 0, 0, 1, 0, 18446744073709551615, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
-            "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
-            "OnRoundEnd: 0, pending []",
-            "OnTaskBegin: 0, 0, 1",
-            "OnTaskEnd: 0, 0, 1"
-        }
-    );
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((2))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((3))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((4))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,1,0)),Index((5))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((6))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((7))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((8))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((9)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending []",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{5}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationFailedSystems: 0, 0, 1, 0, -1, 9",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((1))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((2))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((3))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((4))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,1,0)),Index((5))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((6))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((7))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((8))),MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((9)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())", "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending []",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+}
+
+TEST_CASE("Deterministic: 0 - 10 - 1") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{0}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                 "OnIterationBegin: 0, 0, 1, 0, -1",
+                 "OnIterationEnd: 0, 0, 1, 0, -1",
+                 "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,1,0)),Index((0)))]",
+                 "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                 "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                 "OnRoundEnd: 0, pending []",
+                 "OnTaskBegin: 0, 0, 1",
+                 "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{0}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                 "OnIterationBegin: 0, 0, 1, 0, -1",
+                 "OnIterationEnd: 0, 0, 1, 0, -1",
+                 "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,1,0)),Index((0)))]",
+                 "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                 "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                 "OnRoundEnd: 0, pending []",
+                 "OnTaskBegin: 0, 0, 1",
+                 "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+}
+
+TEST_CASE("Deterministic: 5 - 10 - 1") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{5}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationBegin: 0, 0, 1, 2, -1",
+                "OnIterationBegin: 0, 0, 1, 3, -1",
+                "OnIterationBegin: 0, 0, 1, 4, -1",
+                "OnIterationBegin: 0, 0, 1, 5, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 2, -1",
+                "OnIterationEnd: 0, 0, 1, 3, -1",
+                "OnIterationEnd: 0, 0, 1, 4, -1",
+                "OnIterationEnd: 0, 0, 1, 5, -1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((2)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((3)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((4)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,1,0)),Index((5)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0)))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1)))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((2)))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((2))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((3)))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((2))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((3))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((4)))], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0)))], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1)))], pending [MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0)))]",
+                "OnIterationMergingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((2)))], pending [MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1)))]",
+                "OnIterationMergingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((3)))], pending [MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((2)))]",
+                "OnIterationMergingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((4)))], pending [MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((2))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((3)))]",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending [MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((2))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((3))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((4)))]",
+                "OnRoundMergedWork: 0, pending [MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((2))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((3))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((4)))], removed []",
+                "OnRoundMergingWork: 0, pending [[MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((0))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((1))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((2))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((3))),MyCalculatedResultSystem(Score(Suffix(Result(1,1,1.00),1),Pending(1,1.00,1,0)),Index((4)))]]",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{5}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationBegin: 0, 0, 1, 2, -1",
+                "OnIterationBegin: 0, 0, 1, 3, -1",
+                "OnIterationBegin: 0, 0, 1, 4, -1",
+                "OnIterationBegin: 0, 0, 1, 5, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 2, -1",
+                "OnIterationEnd: 0, 0, 1, 3, -1",
+                "OnIterationEnd: 0, 0, 1, 4, -1",
+                "OnIterationEnd: 0, 0, 1, 5, -1",
+                "OnIterationFailedSystems: 0, 0, 1, 0, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 1, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 2, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 3, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 4, -1, 1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((0)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((1)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((2)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((3)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,0,1.00),1),Pending(0,1.00,1,1)),Index((4)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyCalculatedResultSystem(Score(Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,1,0)),Index((5)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending []",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+}
+
+TEST_CASE("Deterministic: 0,0 - 10 - 10") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{0,0}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0, 0});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(4))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(5))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(6))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(7))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(8))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(9)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))], pending []",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))]",
+                "OnRoundMergedWork: 0, pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))], removed []",
+                "OnRoundMergingWork: 0, pending [[MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))]]",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{0, 0}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0, 0});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                 "OnIterationBegin: 0, 0, 1, 0, -1",
+                 "OnIterationBegin: 0, 0, 1, 1, -1",
+                 "OnIterationEnd: 0, 0, 1, 0, -1",
+                 "OnIterationEnd: 0, 0, 1, 1, -1",
+                 "OnIterationFailedSystems: 0, 0, 1, 0, -1, 9",
+                 "OnIterationFailedSystems: 0, 0, 1, 1, -1, 9",
+                 "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(1)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(2)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(3)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(4)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(5)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(6)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(7)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(8)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(9))]",
+                 "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(4))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(5))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(6))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(7))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(8))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(9)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))], pending []",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending []",
+                "OnTaskBegin: 0, 0, 1", "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+}
+
+TEST_CASE("Deterministic: 0,5 - 10 - 10") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{0,5}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0,5});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(4))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(0,(5))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(6))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(7))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(8))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(9)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))], pending []",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))]",
+                "OnRoundMergedWork: 0, pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))], removed []",
+                "OnRoundMergingWork: 0, pending [[MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))]]",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{0,5}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0,5});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationFailedSystems: 0, 0, 1, 0, -1, 9",
+                "OnIterationFailedSystems: 0, 0, 1, 1, -1, 9",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(1)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(2)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(3)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(4)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(5)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(6)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(7)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(8)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(9))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(4))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(0,(5))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(6))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(7))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(8))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(9)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))], pending []",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending []",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+}
+
+TEST_CASE("Deterministic: 0,0 - 10 - 1") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{0, 0}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0, 0});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(0,(0)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundMergedWork: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnRoundMergingWork: 0, pending [[MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]]",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{0, 0}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0, 0});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                 "OnIterationBegin: 0, 0, 1, 0, -1",
+                 "OnIterationBegin: 0, 0, 1, 1, -1",
+                 "OnIterationEnd: 0, 0, 1, 0, -1",
+                 "OnIterationEnd: 0, 0, 1, 1, -1",
+                 "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))]",
+                 "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(0,(0)))]",
+                 "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                 "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                 "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                 "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                 "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                 "OnRoundEnd: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                 "OnRoundMergedWork: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                 "OnRoundMergingWork: 0, pending [[MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]]",
+                 "OnTaskBegin: 0, 0, 1",
+                 "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+}
+
+TEST_CASE("Deterministic: 0,5 - 10 - 1") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{0, 5}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0, 5});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationBegin: 0, 0, 1, 2, -1",
+                "OnIterationBegin: 0, 0, 1, 3, -1",
+                "OnIterationBegin: 0, 0, 1, 4, -1",
+                "OnIterationBegin: 0, 0, 1, 5, -1",
+                "OnIterationBegin: 0, 0, 1, 6, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 2, -1",
+                "OnIterationEnd: 0, 0, 1, 3, -1",
+                "OnIterationEnd: 0, 0, 1, 4, -1",
+                "OnIterationEnd: 0, 0, 1, 5, -1",
+                "OnIterationEnd: 0, 0, 1, 6, -1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(2)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(3)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(4)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(0,(5)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationGeneratingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationGeneratingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationGeneratingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationGeneratingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationGeneratingWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0)))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1)))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(2)))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(3)))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(4)))], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0)))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnIterationMergingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1)))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0)))]",
+                "OnIterationMergingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(2)))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1)))]",
+                "OnIterationMergingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(3)))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(2)))]",
+                "OnIterationMergingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(4)))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(3)))]",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(4)))]",
+                "OnRoundMergedWork: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(4)))], removed []",
+                "OnRoundMergingWork: 0, pending [[MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(0,(4)))]]",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{0, 5}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{0, 5});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationBegin: 0, 0, 1, 2, -1",
+                "OnIterationBegin: 0, 0, 1, 3, -1",
+                "OnIterationBegin: 0, 0, 1, 4, -1",
+                "OnIterationBegin: 0, 0, 1, 5, -1",
+                "OnIterationBegin: 0, 0, 1, 6, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 2, -1",
+                "OnIterationEnd: 0, 0, 1, 3, -1",
+                "OnIterationEnd: 0, 0, 1, 4, -1",
+                "OnIterationEnd: 0, 0, 1, 5, -1",
+                "OnIterationEnd: 0, 0, 1, 6, -1",
+                "OnIterationFailedSystems: 0, 0, 1, 1, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 2, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 3, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 4, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 5, -1, 1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(0)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(1)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(2)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(3)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(0,(4)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(0,(5)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationGeneratingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationGeneratingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationGeneratingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationGeneratingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationGeneratingWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnIterationMergingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnIterationMergingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnIterationMergingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnIterationMergingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(0))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundMergedWork: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnRoundMergingWork: 0, pending [[MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]]",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+}
+
+TEST_CASE("Deterministic: 5,0 - 10 - 10") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{5,0}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 0});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                 "OnIterationBegin: 0, 0, 1, 0, -1",
+                 "OnIterationBegin: 0, 0, 1, 1, -1",
+                 "OnIterationEnd: 0, 0, 1, 0, -1",
+                 "OnIterationEnd: 0, 0, 1, 1, -1",
+                 "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))]",
+                 "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(4))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(5))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(6))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(7))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(8))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(9)))]",
+                 "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                 "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                 "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))], removed []",
+                 "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))], pending []",
+                 "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                 "OnRoundEnd: 0, pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))]",
+                 "OnRoundMergedWork: 0, pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))], removed []",
+                 "OnRoundMergingWork: 0, pending [[MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))]]",
+                 "OnTaskBegin: 0, 0, 1",
+                 "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{5, 0}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 0});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationFailedSystems: 0, 0, 1, 0, -1, 9",
+                "OnIterationFailedSystems: 0, 0, 1, 1, -1, 9",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(0)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(1)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(2)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(3)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(4)),MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(6)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(7)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(8)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(9))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(4))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(5))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(6))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(7))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(8))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(9)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))], pending []",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending []",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+}
+
+TEST_CASE("Deterministic: 5,5 - 10 - 10") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{5,5}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5,5});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(4))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(5,(5))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(6))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(7))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(8))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(9)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))], pending []",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))]",
+                "OnRoundMergedWork: 0, pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))], removed []",
+                "OnRoundMergingWork: 0, pending [[MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(6)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(7)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(8)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(9))]]",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{5,5}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5,5});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationFailedSystems: 0, 0, 1, 0, -1, 9",
+                "OnIterationFailedSystems: 0, 0, 1, 1, -1, 9",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(0)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(1)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(2)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(3)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(4)),MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(6)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(7)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(8)),MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(9))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(4))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(5,(5))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(6))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(7))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(8))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(9)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))], pending []",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending []",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+}
+
+TEST_CASE("Deterministic: 5,0 - 10 - 1") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{5, 0}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 0});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationBegin: 0, 0, 1, 2, -1",
+                "OnIterationBegin: 0, 0, 1, 3, -1",
+                "OnIterationBegin: 0, 0, 1, 4, -1",
+                "OnIterationBegin: 0, 0, 1, 5, -1",
+                "OnIterationBegin: 0, 0, 1, 6, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 2, -1",
+                "OnIterationEnd: 0, 0, 1, 3, -1",
+                "OnIterationEnd: 0, 0, 1, 4, -1",
+                "OnIterationEnd: 0, 0, 1, 5, -1",
+                "OnIterationEnd: 0, 0, 1, 6, -1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(5,(0)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0))], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1))], pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0))]",
+                "OnIterationMergingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2))], pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1))]",
+                "OnIterationMergingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3))], pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2))]",
+                "OnIterationMergingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3))]",
+                "OnIterationMergingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]",
+                "OnRoundMergedWork: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], removed []",
+                "OnRoundMergingWork: 0, pending [[MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]]",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{5, 0}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 0});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationBegin: 0, 0, 1, 2, -1",
+                "OnIterationBegin: 0, 0, 1, 3, -1",
+                "OnIterationBegin: 0, 0, 1, 4, -1",
+                "OnIterationBegin: 0, 0, 1, 5, -1",
+                "OnIterationBegin: 0, 0, 1, 6, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 2, -1",
+                "OnIterationEnd: 0, 0, 1, 3, -1",
+                "OnIterationEnd: 0, 0, 1, 4, -1",
+                "OnIterationEnd: 0, 0, 1, 5, -1",
+                "OnIterationEnd: 0, 0, 1, 6, -1",
+                "OnIterationFailedSystems: 0, 0, 1, 0, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 1, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 2, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 3, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 4, -1, 1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(0))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(1))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(2))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(3))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(4))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(5,(0)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundMergedWork: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnRoundMergingWork: 0, pending [[MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]]",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+}
+
+TEST_CASE("Deterministic: 5,5 - 10 - 1") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{5, 5}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 5});
+
+        // This string is too big for MSVC
+#if (!defined _MSC_VER || defined __clang__)
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationBegin: 0, 0, 1, 10, -1",
+                "OnIterationBegin: 0, 0, 1, 11, -1",
+                "OnIterationBegin: 0, 0, 1, 2, -1",
+                "OnIterationBegin: 0, 0, 1, 3, -1",
+                "OnIterationBegin: 0, 0, 1, 4, -1",
+                "OnIterationBegin: 0, 0, 1, 5, -1",
+                "OnIterationBegin: 0, 0, 1, 6, -1",
+                "OnIterationBegin: 0, 0, 1, 7, -1",
+                "OnIterationBegin: 0, 0, 1, 8, -1",
+                "OnIterationBegin: 0, 0, 1, 9, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 10, -1",
+                "OnIterationEnd: 0, 0, 1, 11, -1",
+                "OnIterationEnd: 0, 0, 1, 2, -1",
+                "OnIterationEnd: 0, 0, 1, 3, -1",
+                "OnIterationEnd: 0, 0, 1, 4, -1",
+                "OnIterationEnd: 0, 0, 1, 5, -1",
+                "OnIterationEnd: 0, 0, 1, 6, -1",
+                "OnIterationEnd: 0, 0, 1, 7, -1",
+                "OnIterationEnd: 0, 0, 1, 8, -1",
+                "OnIterationEnd: 0, 0, 1, 9, -1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 10, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(4)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 11, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(5,(5)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 7, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 8, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(2)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 9, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(3)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 10, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationGeneratingWork: 0, 0, 1, 11, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationGeneratingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationGeneratingWork: 0, 0, 1, 7, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationGeneratingWork: 0, 0, 1, 8, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationGeneratingWork: 0, 0, 1, 9, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 10, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(4))),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 7, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1))),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 8, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(2))),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 9, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(3))),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0))], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1))], pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0))]",
+                "OnIterationMergingWork: 0, 0, 1, 10, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(4)))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(3))),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]",
+                "OnIterationMergingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2))], pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1))]",
+                "OnIterationMergingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3))], pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2))]",
+                "OnIterationMergingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3))]",
+                "OnIterationMergingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending [MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]",
+                "OnIterationMergingWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0)))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]",
+                "OnIterationMergingWork: 0, 0, 1, 7, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1)))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]",
+                "OnIterationMergingWork: 0, 0, 1, 8, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(2)))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1))),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]",
+                "OnIterationMergingWork: 0, 0, 1, 9, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(3)))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(2))),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(4))),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]",
+                "OnRoundMergedWork: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(4))),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))], removed []",
+                "OnRoundMergingWork: 0, pending [[MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(0))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(1))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(2))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(3))),MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,50001.00),1),Pending(1,75001.00,2,0)),Index(5,(4))),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(0)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(1)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(2)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(3)),MyWorkingSystem(Score([Result(1,1,1.00)],Pending(1,1.00,1,0)),Index(4))]]",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+#endif
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{5, 5}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 5});
+        CHECK(
+            observer.GetStrings() ==
+            std::vector<std::string>{
+                "OnIterationBegin: 0, 0, 1, 0, -1",
+                "OnIterationBegin: 0, 0, 1, 1, -1",
+                "OnIterationBegin: 0, 0, 1, 10, -1",
+                "OnIterationBegin: 0, 0, 1, 11, -1",
+                "OnIterationBegin: 0, 0, 1, 2, -1",
+                "OnIterationBegin: 0, 0, 1, 3, -1",
+                "OnIterationBegin: 0, 0, 1, 4, -1",
+                "OnIterationBegin: 0, 0, 1, 5, -1",
+                "OnIterationBegin: 0, 0, 1, 6, -1",
+                "OnIterationBegin: 0, 0, 1, 7, -1",
+                "OnIterationBegin: 0, 0, 1, 8, -1",
+                "OnIterationBegin: 0, 0, 1, 9, -1",
+                "OnIterationEnd: 0, 0, 1, 0, -1",
+                "OnIterationEnd: 0, 0, 1, 1, -1",
+                "OnIterationEnd: 0, 0, 1, 10, -1",
+                "OnIterationEnd: 0, 0, 1, 11, -1",
+                "OnIterationEnd: 0, 0, 1, 2, -1",
+                "OnIterationEnd: 0, 0, 1, 3, -1",
+                "OnIterationEnd: 0, 0, 1, 4, -1",
+                "OnIterationEnd: 0, 0, 1, 5, -1",
+                "OnIterationEnd: 0, 0, 1, 6, -1",
+                "OnIterationEnd: 0, 0, 1, 7, -1",
+                "OnIterationEnd: 0, 0, 1, 8, -1",
+                "OnIterationEnd: 0, 0, 1, 9, -1",
+                "OnIterationFailedSystems: 0, 0, 1, 0, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 1, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 10, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 2, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 3, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 4, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 6, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 7, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 8, -1, 1",
+                "OnIterationFailedSystems: 0, 0, 1, 9, -1, 1",
+                "OnIterationGeneratedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(0))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(1))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 10, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(4)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 11, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,1,100001.00),1),Pending(1,100001.00,2,0)),Index(5,(5)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(2))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(3))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,0,1.00)],Pending(0,1.00,1,1)),Index(4))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(0)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 7, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(1)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 8, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(2)))]",
+                "OnIterationGeneratedWork: 0, 0, 1, 9, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyCalculatedResultSystem(Score([Result(1,1,100001.00)],Suffix(Result(1,0,50001.00),1),Pending(0,75001.00,2,1)),Index(5,(3)))]",
+                "OnIterationGeneratingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 10, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationGeneratingWork: 0, 0, 1, 11, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationGeneratingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())",
+                "OnIterationGeneratingWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationGeneratingWork: 0, 0, 1, 7, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationGeneratingWork: 0, 0, 1, 8, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationGeneratingWork: 0, 0, 1, 9, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))",
+                "OnIterationMergedWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 10, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 7, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 8, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergedWork: 0, 0, 1, 9, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), pending [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnIterationMergingWork: 0, 0, 1, 0, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 1, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 10, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnIterationMergingWork: 0, 0, 1, 2, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 3, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 4, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 5, -1, active MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index()), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)),MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], pending []",
+                "OnIterationMergingWork: 0, 0, 1, 6, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnIterationMergingWork: 0, 0, 1, 7, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnIterationMergingWork: 0, 0, 1, 8, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnIterationMergingWork: 0, 0, 1, 9, -1, active MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5)), generated [MyWorkingSystem(Score([Result(1,1,100001.00)],Pending(1,100001.00,1,0)),Index(5))], pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundBegin: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundEnd: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]",
+                "OnRoundMergedWork: 0, pending [MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())], removed []",
+                "OnRoundMergingWork: 0, pending [[MyWorkingSystem(Score(Pending(1,100001.00,0,0)),Index())]]",
+                "OnTaskBegin: 0, 0, 1",
+                "OnTaskEnd: 0, 0, 1"
+            }
+        );
+    }
+}
+
+TEST_CASE("Deterministic: 5,4,3,2,1 - 10 - 10") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{5, 4, 3, 2, 1}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 4, 3, 2, 1});
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{5, 4, 3, 2, 1}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 4, 3, 2, 1});
+    }
+}
+
+TEST_CASE("Deterministic: 5,4,3,2,1 - 10 - 1") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{5, 4, 3, 2, 1}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 4, 3, 2, 1});
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{5, 4, 3, 2, 1}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{5, 4, 3, 2, 1});
+    }
+}
+
+TEST_CASE("Deterministic: 1,2,3,4,5,6,7 - 10 - 10") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{1, 2, 3, 4, 5, 6, 7}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{1, 2, 3, 4, 5, 6, 7});
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(10, MyCondition::Create(MyCondition::IndexesType{1, 2, 3, 4, 5, 6, 7}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{1, 2, 3, 4, 5, 6, 7});
+    }
+}
+
+TEST_CASE("Deterministic: 1,2,3,4,5,6,7 - 10 - 1") {
+    LocalExecution::Engine::ExecuteResultValue          result;
+    LocalExecution::Engine::ResultSystemUniquePtr       pResult;
+    Configuration                                       configuration(10, true);
+    MyObserver                                          observer;
+
+    SECTION("Mismatches are not failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{1, 2, 3, 4, 5, 6, 7}, false))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{1, 2, 3, 4, 5, 6, 7});
+    }
+
+    SECTION("Mismatches are failures") {
+        std::tie(result, pResult) = LocalExecution::Engine::Execute(
+            configuration,
+            observer,
+            MyWorkingSystem(1, MyCondition::Create(MyCondition::IndexesType{1, 2, 3, 4, 5, 6, 7}, true))
+        );
+
+        CHECK(result == LocalExecution::Engine::ExecuteResultValue::Completed);
+        REQUIRE(pResult);
+        CHECK(GetIndexes(*pResult) == std::vector<size_t>{1, 2, 3, 4, 5, 6, 7});
+    }
 }

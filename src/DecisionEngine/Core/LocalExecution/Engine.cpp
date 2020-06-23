@@ -107,17 +107,6 @@ public:
         _observer.OnIterationEnd(_round, _task, _numTasks, iteration, maxIterations);
     }
 
-    bool OnResultSystem(size_t iteration, size_t maxIterations, ResultSystemUniquePtr pResult) override {
-        assert(pResult);
-
-        if(_observer.OnIterationResultSystem(_round, _task, _numTasks, iteration, maxIterations, std::move(pResult)) == false) {
-            _isCancelled = true;
-            return false;
-        }
-
-        return true;
-    }
-
     bool OnGeneratingWork(size_t iteration, size_t maxIterations, WorkingSystem const &active) override {
         if(_observer.OnIterationGeneratingWork(_round, _task, _numTasks, iteration, maxIterations, active) == false) {
             _isCancelled = true;
@@ -144,8 +133,24 @@ public:
         _observer.OnIterationMergedWork(_round, _task, _numTasks, iteration, maxIterations, active, pending, std::move(removed));
     }
 
-    void OnFailedSystems(size_t iteration, size_t maxIterations, WorkingSystem const &active, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) override {
-        _observer.OnIterationFailedSystems(_round, _task, _numTasks, iteration, maxIterations, active, begin, end);
+    bool OnFailedSystems(size_t iteration, size_t maxIterations, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) override {
+        if(_observer.OnIterationFailedSystems(_round, _task, _numTasks, iteration, maxIterations, begin, end) == false) {
+            _isCancelled = true;
+            return false;
+        }
+
+        return true;
+    }
+
+    bool OnSuccessfulSystems(size_t iteration, size_t maxIterations, ResultSystemUniquePtrs results) override {
+        assert(results.empty() == false);
+
+        if(_observer.OnIterationResultSystems(_round, _task, _numTasks, iteration, maxIterations, std::move(results)) == false) {
+            _isCancelled = true;
+            return false;
+        }
+
+        return true;
     }
 };
 
@@ -442,36 +447,64 @@ void CollectionResultObserver::OnIterationMergedWork(size_t round, size_t task, 
     _observer.OnIterationMergedWork(round, task, numTasks, iteration, numIterations, active, pending, std::move(removed));
 }
 
-void CollectionResultObserver::OnIterationFailedSystems(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, WorkingSystem const &active, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) /*override*/ {
-    _observer.OnIterationFailedSystems(round, task, numTasks, iteration, numIterations, active, begin, end);
+bool CollectionResultObserver::OnIterationFailedSystems(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) /*override*/ {
+    return _observer.OnIterationFailedSystems(round, task, numTasks, iteration, numIterations, begin, end);
 }
 
 // ResultObserver methods
-bool CollectionResultObserver::OnIterationResultSystem(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, ResultSystemUniquePtr pResult) /*override*/ {
+bool CollectionResultObserver::OnIterationResultSystems(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, ResultSystemUniquePtrs theseResults) /*override*/ {
     UNUSED(round);
     UNUSED(task);
     UNUSED(numTasks);
     UNUSED(iteration);
     UNUSED(numIterations);
 
-    ENSURE_ARGUMENT(pResult);
-    return _applyResultFunc(_mxResults, results, std::move(pResult)) < _maxNumResults;
+    ENSURE_ARGUMENT(theseResults.empty() == false);
+
+    bool                                    shouldContinue(
+        [this, &theseResults](void) {
+            if(results.size() + theseResults.size() > _maxNumResults) {
+                size_t const                toRemove(results.size() + theseResults.size() - _maxNumResults);
+
+                assert(toRemove);
+                assert(toRemove < theseResults.size());
+
+                ResultSystemUniquePtrs::iterator        iter(theseResults.begin());
+
+                std::advance(iter, theseResults.size() - toRemove);
+                theseResults.erase(iter, theseResults.end());
+
+                assert(theseResults.empty() == false);
+
+                return false;
+            }
+
+            if(results.size() + theseResults.size() == _maxNumResults)
+                return false;
+
+            return true;
+        }()
+    );
+
+    _applyResultFunc(_mxResults, results, std::move(theseResults));
+
+    return shouldContinue;
 }
 
 // ----------------------------------------------------------------------
 // ----------------------------------------------------------------------
 // ----------------------------------------------------------------------
 // static
-size_t CollectionResultObserver::SingleThreadedApplyResultSystem(std::mutex &, ResultSystemUniquePtrs &results, ResultSystemUniquePtr pResult) {
-    results.emplace_back(std::move(pResult));
-    return results.size();
+void CollectionResultObserver::SingleThreadedApplyResultSystem(std::mutex &, ResultSystemUniquePtrs &results, ResultSystemUniquePtrs theseResults) {
+    for(auto &pResult : theseResults)
+        results.emplace_back(std::move(pResult));
 }
 
 // static
-size_t CollectionResultObserver::MultiThreadedApplyResultSystem(std::mutex &m, ResultSystemUniquePtrs &results, ResultSystemUniquePtr pResult) {
+void CollectionResultObserver::MultiThreadedApplyResultSystem(std::mutex &m, ResultSystemUniquePtrs &results, ResultSystemUniquePtrs theseResults) {
     std::scoped_lock<decltype(m)>           lock(m); UNUSED(lock);
 
-    return SingleThreadedApplyResultSystem(m, results, std::move(pResult));
+    SingleThreadedApplyResultSystem(m, results, std::move(theseResults));
 }
 
 // ----------------------------------------------------------------------

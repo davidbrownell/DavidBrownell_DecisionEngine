@@ -104,7 +104,7 @@ public:
     virtual bool OnIterationMergingWork(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, WorkingSystem const &active, SystemPtrs const &generated, SystemPtrs const &pending) = 0;
     virtual void OnIterationMergedWork(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, WorkingSystem const &active, SystemPtrs const &pending, SystemPtrsContainer removed) = 0;
 
-    virtual void OnIterationFailedSystems(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, WorkingSystem const &active, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) = 0;
+    virtual bool OnIterationFailedSystems(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) = 0;
 };
 
 /////////////////////////////////////////////////////////////////////////
@@ -118,7 +118,7 @@ public:
     // |  Public Types
     // |
     // ----------------------------------------------------------------------
-    using ResultSystemUniquePtr             = DecisionEngine::Core::LocalExecution::Engine::ResultSystemUniquePtr;
+    using ResultSystemUniquePtrs            = DecisionEngine::Core::LocalExecution::Engine::ResultSystemUniquePtrs;
 
     // ----------------------------------------------------------------------
     // |
@@ -127,7 +127,7 @@ public:
     // ----------------------------------------------------------------------
     ~ResultObserver(void) override = default;
 
-    virtual bool OnIterationResultSystem(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, ResultSystemUniquePtr pResult) = 0;
+    virtual bool OnIterationResultSystems(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, ResultSystemUniquePtrs results) = 0;
 };
 
 /////////////////////////////////////////////////////////////////////////
@@ -268,15 +268,15 @@ public:
     bool OnIterationMergingWork(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, WorkingSystem const &active, SystemPtrs const &generated, SystemPtrs const &pending) override;
     void OnIterationMergedWork(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, WorkingSystem const &active, SystemPtrs const &pending, SystemPtrsContainer removed) override;
 
-    void OnIterationFailedSystems(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, WorkingSystem const &active, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) override;
+    bool OnIterationFailedSystems(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, SystemPtrs::const_iterator begin, SystemPtrs::const_iterator end) override;
 
     // ResultObserver methods
-    bool OnIterationResultSystem(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, ResultSystemUniquePtr pResult) override;
+    bool OnIterationResultSystems(size_t round, size_t task, size_t numTasks, size_t iteration, size_t numIterations, ResultSystemUniquePtrs theseResults) override;
 
 private:
     // ----------------------------------------------------------------------
     // |  Private Types
-    using ApplyResultSystemPtr              = size_t (*)(std::mutex &, ResultSystemUniquePtrs &, ResultSystemUniquePtr);
+    using ApplyResultSystemPtr              = void (*)(std::mutex &, ResultSystemUniquePtrs &, ResultSystemUniquePtrs);
 
     // ----------------------------------------------------------------------
     // |  Private Data
@@ -288,8 +288,8 @@ private:
 
     // ----------------------------------------------------------------------
     // |  Private Methods
-    static size_t SingleThreadedApplyResultSystem(std::mutex &m, ResultSystemUniquePtrs &results, ResultSystemUniquePtr pResult);
-    static size_t MultiThreadedApplyResultSystem(std::mutex &m, ResultSystemUniquePtrs &results, ResultSystemUniquePtr pResult);
+    static void SingleThreadedApplyResultSystem(std::mutex &m, ResultSystemUniquePtrs &results, ResultSystemUniquePtrs theseResults);
+    static void MultiThreadedApplyResultSystem(std::mutex &m, ResultSystemUniquePtrs &results, ResultSystemUniquePtrs theseResults);
 };
 
 // ----------------------------------------------------------------------
@@ -333,21 +333,8 @@ std::tuple<ExecuteResultValue, ResultSystemUniquePtr> Execute(
         )
     );
 
-    if(std::get<1>(result).size() >= 1) {
-        ResultSystemUniquePtrs &            results(std::get<1>(result));
-
-        if(results.size() > 1) {
-            std::sort(
-                results.begin(),
-                results.end(),
-                [](ResultSystemUniquePtr const &p1, ResultSystemUniquePtr const &p2) {
-                    return *p1 > *p2;
-                }
-            );
-        }
-
-        return std::make_tuple(ExecuteResultValue::Completed, std::move(results[0]));
-    }
+    if(std::get<1>(result).size() >= 1)
+        return std::make_tuple(ExecuteResultValue::Completed, std::move(std::get<1>(result)[0]));
 
     return std::make_tuple(std::get<0>(result), ResultSystemUniquePtr());
 }
@@ -384,19 +371,11 @@ std::tuple<ExecuteResultValue, ResultSystemUniquePtrs> Execute(
         )
     );
 
-    if(result != ExecuteResultValue::Completed && cro.results.size() >= maxNumResults)
-        result = ExecuteResultValue::Completed;
-
-    std::sort(
-        cro.results.begin(),
-        cro.results.end(),
-        [](ResultSystemUniquePtr const &p1, ResultSystemUniquePtr const &p2) {
-            return *p1 > *p2;
-        }
-    );
-
-    if(cro.results.size() != maxNumResults)
+    if(cro.results.size() > maxNumResults)
         cro.results.resize(maxNumResults);
+
+    if(result != ExecuteResultValue::Completed && cro.results.size() == maxNumResults)
+        result = ExecuteResultValue::Completed;
 
     return std::make_tuple(std::move(result), config.Finalize(std::move(cro.results)));
 }
