@@ -33,12 +33,16 @@ TEST_CASE("Default Ctor") {
     NS::Index const                         index;
 
     CHECK(index.HasSuffix() == false);
+    CHECK(index.AtRoot());
+    CHECK(index.Depth() == 0);
 }
 
 TEST_CASE("Index Ctor") {
     NS::Index const                         index(10);
 
     CHECK(index.HasSuffix());
+    CHECK(index.AtRoot() == false);
+    CHECK(index.Depth() == 1);
 }
 
 TEST_CASE("Indexes Ctor") {
@@ -50,6 +54,8 @@ TEST_CASE("Indexes Ctor") {
     );
 
     CHECK(index.HasSuffix());
+    CHECK(index.AtRoot() == false);
+    CHECK(index.Depth() == 2);
 }
 
 NS::Index CreateIndex(NS::Index index, std::vector<NS::Index::value_type> values) {
@@ -58,6 +64,14 @@ NS::Index CreateIndex(NS::Index index, std::vector<NS::Index::value_type> values
     }
 
     return index;
+}
+
+TEST_CASE("ToString") {
+    CHECK(NS::Index().ToString() == "Index()");
+    CHECK(NS::Index(10).ToString() == "Index((10))");
+    CHECK(NS::Index(CreateIndex(NS::Index(), {1})).ToString() == "Index(1)");
+    CHECK(NS::Index(CreateIndex(NS::Index(), {1}), 2).ToString() == "Index(1,(2))");
+    CHECK(NS::Index(CreateIndex(NS::Index(), {1, 2, 3}), 4).ToString() == "Index(1,2,3,(4))");
 }
 
 TEST_CASE("Compare") {

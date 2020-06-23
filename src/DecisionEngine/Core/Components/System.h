@@ -82,7 +82,7 @@ public:
     SERIALIZATION(System, ARGS, FLAGS(SERIALIZATION_ABSTRACT));
 
     // Note that the order of these arguments are very important to ensure stable comparisons
-    COMPARE(System, MEMBERS(Type, _score, _index, Completion));
+    COMPARE(System, MEMBERS(_score, Type, Completion, _index));
 
 #undef ARGS
 

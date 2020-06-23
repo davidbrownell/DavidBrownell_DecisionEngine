@@ -40,6 +40,9 @@ public:
     // |  Public Types
     // |
     // ----------------------------------------------------------------------
+    using Index                             = DecisionEngine::Core::Components::Index;
+    using Score                             = DecisionEngine::Core::Components::Score;
+
     using SystemPtr                         = std::shared_ptr<System>;
     using SystemPtrs                        = std::deque<SystemPtr>;
 
