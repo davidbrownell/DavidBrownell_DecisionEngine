@@ -24,6 +24,7 @@ function(Impl)
         FILES
             ${_this_path}/Condition_UnitTest.cpp
             ${_this_path}/ConstrainedResource_UnitTest.cpp
+            ${_this_path}/Request_UnitTest.cpp
 
         PRECOMPILED_LIBRARY_HEADERS
             DecisionEngineConstrainedResource

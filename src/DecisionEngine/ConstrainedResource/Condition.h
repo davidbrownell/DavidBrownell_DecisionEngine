@@ -56,7 +56,7 @@ public:
     // ----------------------------------------------------------------------
     using Core::Components::Condition::Condition;
 
-    virtual ~Condition(void) = default;
+    ~Condition(void) override = default;
 
 #define ARGS                                BASES(Core::Components::Condition)
 

@@ -18,6 +18,7 @@ function(Impl)
             DecisionEngineConstrainedResource
 
         FILES
+            ${_this_path}/../Condition.cpp
             ${_this_path}/../Condition.h
             ${_this_path}/../ConstrainedResource.h
             ${_this_path}/../Request.cpp

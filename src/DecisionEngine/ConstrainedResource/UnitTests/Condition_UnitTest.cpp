@@ -29,6 +29,15 @@
 
 namespace NS                                = DecisionEngine::ConstrainedResource;
 
+namespace DecisionEngine {
+namespace ConstrainedResource {
+
+class Request {};
+class Resource {};
+
+} // namespace ConstrainedResource
+} // namespace DecisionEngine
+
 class MyCondition : public NS::Condition {
 private:
     // ----------------------------------------------------------------------
@@ -67,8 +76,11 @@ public:
 SERIALIZATION_POLYMORPHIC_DECLARE_AND_DEFINE(MyCondition);
 
 TEST_CASE("Apply") {
-    CHECK(MyCondition::Create(true)->Apply(*reinterpret_cast<NS::Request const *>(nullptr), *reinterpret_cast<NS::Resource const *>(nullptr)).IsSuccessful);
-    CHECK(MyCondition::Create(false)->Apply(*reinterpret_cast<NS::Request const *>(nullptr), *reinterpret_cast<NS::Resource const *>(nullptr)).IsSuccessful == false);
+    NS::Request const                       request;
+    NS::Resource const                      resource;
+
+    CHECK(MyCondition::Create(true)->Apply(request, resource).IsSuccessful);
+    CHECK(MyCondition::Create(false)->Apply(request, resource).IsSuccessful == false);
 }
 
 TEST_CASE("Compare") {
