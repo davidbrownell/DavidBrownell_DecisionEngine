@@ -29,7 +29,7 @@ function(Impl)
             ${_this_path}/PermutationGenerator_UnitTest.cpp
             ${_this_path}/PermutationGeneratorFactory_UnitTest.cpp
             ${_this_path}/Request_UnitTest.cpp
-            # TODO ${_this_path}/Resource_UnitTest.cpp
+            ${_this_path}/Resource_UnitTest.cpp
             ${_this_path}/ResultSystem_UnitTest.cpp
             ${_this_path}/StandardPermutationGenerator_UnitTest.cpp
             # TODO ${_this_path}/WorkingSystem_UnitTest.cpp

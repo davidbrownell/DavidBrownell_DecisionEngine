@@ -100,7 +100,7 @@ public:
     NON_COPYABLE(PermutationGeneratorFactoryImpl);
     MOVE(PermutationGeneratorFactoryImpl, ARGS);
     COMPARE(PermutationGeneratorFactoryImpl, ARGS);
-    SERIALIZATION(PermutationGeneratorFactoryImpl, ARGS, FLAGS(SERIALIZATION_POLYMORPHIC(PermutationGeneratorFactory)));
+    SERIALIZATION(PermutationGeneratorFactoryImpl, ARGS, FLAGS(SERIALIZATION_DATA_ONLY));
 
 #undef ARGS
 

@@ -71,10 +71,29 @@ private:
 };
 
 /////////////////////////////////////////////////////////////////////////
-///  \typedef       StandardPermutationGeneratorFactory
+///  \class         StandardPermutationGeneratorFactory
 ///  \brief         Factory that generates StandardPermutationGenerator instances
 ///
-using StandardPermutationGeneratorFactory   = PermutationGeneratorFactoryImpl<StandardPermutationGenerator>;
+class StandardPermutationGeneratorFactory : public PermutationGeneratorFactoryImpl<StandardPermutationGenerator>
+{
+public:
+    // ----------------------------------------------------------------------
+    // |  Public Types
+    using BaseType                          = PermutationGeneratorFactoryImpl<StandardPermutationGenerator>;
+
+    // ----------------------------------------------------------------------
+    // |  Public Methods
+    using BaseType::BaseType;
+
+#define ARGS                                BASES(BaseType)
+
+    NON_COPYABLE(StandardPermutationGeneratorFactory);
+    MOVE(StandardPermutationGeneratorFactory, ARGS);
+    COMPARE(StandardPermutationGeneratorFactory, ARGS);
+    SERIALIZATION(StandardPermutationGeneratorFactory, ARGS, FLAGS(SERIALIZATION_POLYMORPHIC(PermutationGeneratorFactory)));
+
+#undef ARGS
+};
 
 } // namespace ConstrainedResource
 } // namespace DecisionEngine

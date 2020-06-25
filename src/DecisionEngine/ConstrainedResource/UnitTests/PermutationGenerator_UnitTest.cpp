@@ -87,7 +87,7 @@ public:
 private:
     // ----------------------------------------------------------------------
     // |  Private Methods
-    RequestPtrsPtrs GenerateImpl(RequestPtrs const &requests, size_t maxNumPermutations) {
+    RequestPtrsPtrs GenerateImpl(RequestPtrs const &requests, size_t maxNumPermutations) override {
         if(_autoComplete)
             _isActive = false;
 
