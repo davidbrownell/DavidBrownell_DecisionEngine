@@ -22,6 +22,7 @@
 #pragma once
 
 #include <CommonHelpers/Compare.h>
+#include <CommonHelpers/Constructor.h>
 #include <CommonHelpers/Copy.h>
 #include <CommonHelpers/Finally.h>
 #include <CommonHelpers/Move.h>
@@ -47,6 +48,7 @@
 #include <boost/serialization/deque.hpp>
 #include <boost/serialization/optional.hpp>
 #include <boost/serialization/string.hpp>
+#include <boost/serialization/variant.hpp>
 #include <boost/serialization/vector.hpp>
 
 #include <algorithm>
