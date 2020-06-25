@@ -32,6 +32,14 @@ namespace ConstrainedResource {
 ///                 for Requests within a group.
 ///
 class PermutationGenerator {
+private:
+    // ----------------------------------------------------------------------
+    // |
+    // |  Private Data (used in public declarations)
+    // |
+    // ----------------------------------------------------------------------
+    size_t                                  _permutationsRemaining;
+
 protected:
     // ----------------------------------------------------------------------
     // |
@@ -60,10 +68,10 @@ public:
     // |  Public Methods
     // |
     // ----------------------------------------------------------------------
-    PermutationGenerator(void);
+    PermutationGenerator(size_t maxNumTotalPermutations);
     virtual ~PermutationGenerator(void) = default;
 
-#define ARGS                                MEMBERS(_isActive)
+#define ARGS                                MEMBERS(_permutationsRemaining, _isActive)
 
     NON_COPYABLE(PermutationGenerator);
     MOVE(PermutationGenerator, ARGS);

@@ -58,14 +58,24 @@ private:
     // ----------------------------------------------------------------------
     // |  Private Data (used in public declarations)
     GenerateType const                      _generateType;
+    bool const                              _autoComplete;
 
 public:
     // ----------------------------------------------------------------------
     // |  Public Methods
-    MyPermutationGenerator(GenerateType generateType) : _generateType(generateType) {}
+    MyPermutationGenerator(
+        GenerateType generateType,
+        bool autoComplete=true,
+        size_t maxNumTotalPermutations=2
+    ) :
+        NS::PermutationGenerator(maxNumTotalPermutations),
+        _generateType(generateType),
+        _autoComplete(autoComplete)
+    {}
+
     ~MyPermutationGenerator(void) override = default;
 
-#define ARGS                                MEMBERS(_generateType), BASES(NS::PermutationGenerator)
+#define ARGS                                MEMBERS(_generateType, _autoComplete), BASES(NS::PermutationGenerator)
 
     NON_COPYABLE(MyPermutationGenerator);
     MOVE(MyPermutationGenerator, ARGS);
@@ -78,7 +88,8 @@ private:
     // ----------------------------------------------------------------------
     // |  Private Methods
     RequestPtrsPtrs GenerateImpl(RequestPtrs const &requests, size_t maxNumPermutations) {
-        _isActive = false;
+        if(_autoComplete)
+            _isActive = false;
 
         if(_generateType == GenerateType::Valid)
             return RequestPtrsPtrs{ std::make_shared<RequestPtrs>(requests) };
@@ -116,22 +127,50 @@ TEST_CASE("Standard") {
     CHECK(generator.IsComplete());
 }
 
+TEST_CASE("Invalid Construction") {
+    CHECK_THROWS_MATCHES(
+        MyPermutationGenerator(
+            MyPermutationGenerator::GenerateType::Valid,
+            true,
+            0
+        ),
+        std::invalid_argument,
+        Catch::Matchers::Exception::ExceptionMessageMatcher("maxNumTotalPermutations")
+    );
+};
+
 TEST_CASE("Generate") {
     MyPermutationGenerator::RequestPtrs const           requests{ std::make_shared<NS::Request>(), std::make_shared<NS::Request>() };
 
     SECTION("Valid") {
         MyPermutationGenerator                          generator(MyPermutationGenerator::GenerateType::Valid);
+
+        CHECK(generator.IsComplete() == false);
+
         MyPermutationGenerator::RequestPtrsPtrs const   results(generator.Generate(requests, 1));
 
         REQUIRE(results.size() == 1);
         CHECK(*results[0] == requests);
 
         // Attempts to invoke Generate after the generator is complete should result in errors
+        CHECK(generator.IsComplete());
         CHECK_THROWS_MATCHES(
             generator.Generate(requests, 1),
             std::runtime_error,
             Catch::Matchers::Exception::ExceptionMessageMatcher("Invalid operation")
         );
+    }
+
+    SECTION("Valid - Closed by base") {
+        MyPermutationGenerator                          generator(MyPermutationGenerator::GenerateType::Valid, false, 2);
+
+        CHECK(generator.IsComplete() == false);
+
+        generator.Generate(requests, 1);
+        CHECK(generator.IsComplete() == false);
+
+        generator.Generate(requests, 1);
+        CHECK(generator.IsComplete());
     }
 
     SECTION("Invalid - Empty") {

@@ -29,7 +29,15 @@ namespace ConstrainedResource {
 // |  PermutationGenerator
 // |
 // ----------------------------------------------------------------------
-PermutationGenerator::PermutationGenerator(void) :
+PermutationGenerator::PermutationGenerator(size_t maxNumTotalPermutations) :
+    _permutationsRemaining(
+        std::move(
+            [&maxNumTotalPermutations](void) -> size_t & {
+                ENSURE_ARGUMENT(maxNumTotalPermutations);
+                return maxNumTotalPermutations;
+            }()
+        )
+    ),
     _isActive(true)
 {}
 
@@ -44,11 +52,12 @@ PermutationGenerator::RequestPtrsPtrs PermutationGenerator::Generate(RequestPtrs
     if(IsComplete())
         throw std::runtime_error("Invalid operation");
 
-    RequestPtrsPtrs                         results(GenerateImpl(requests, maxNumPermutations));
+    size_t const                            permutationsToGenerate(std::min(_permutationsRemaining, maxNumPermutations));
+    RequestPtrsPtrs                         results(GenerateImpl(requests, permutationsToGenerate));
 
     if(
         results.empty()
-        || results.size() > maxNumPermutations
+        || results.size() > permutationsToGenerate
         || std::any_of(
             results.cbegin(),
             results.cend(),
@@ -66,6 +75,10 @@ PermutationGenerator::RequestPtrsPtrs PermutationGenerator::Generate(RequestPtrs
         )
     )
         throw std::runtime_error("Invalid RequestPtrsPtrs");
+
+    _permutationsRemaining -= permutationsToGenerate;
+    if(_permutationsRemaining == 0)
+        _isActive = false;
 
     return results;
 }
