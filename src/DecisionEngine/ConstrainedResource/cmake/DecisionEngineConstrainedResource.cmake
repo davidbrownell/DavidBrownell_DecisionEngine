@@ -31,10 +31,10 @@ function(Impl)
             ${_this_path}/../PermutationGeneratorFactory.h
             ${_this_path}/../Request.cpp
             ${_this_path}/../Request.h
-            # TODO ${_this_path}/../Resource.cpp
-            # TODO ${_this_path}/../Resource.h
-            # TODO ${_this_path}/../ResultSystem.cpp
-            # TODO ${_this_path}/../ResultSystem.h
+            ${_this_path}/../Resource.cpp
+            ${_this_path}/../Resource.h
+            ${_this_path}/../ResultSystem.cpp
+            ${_this_path}/../ResultSystem.h
             ${_this_path}/../StandardPermutationGenerator.cpp
             ${_this_path}/../StandardPermutationGenerator.h
             # TODO ${_this_path}/../WorkingSystem.cpp
