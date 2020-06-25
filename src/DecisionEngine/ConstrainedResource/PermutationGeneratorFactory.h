@@ -92,7 +92,7 @@ public:
     // |  Public Methods
     // |
     // ----------------------------------------------------------------------
-    PermutationGeneratorFactoryImpl(size_t maxNumTotalPermutations);
+    using PermutationGeneratorFactory::PermutationGeneratorFactory;
     ~PermutationGeneratorFactoryImpl(void) override = default;
 
 #define ARGS                                BASES(PermutationGeneratorFactory)
@@ -110,7 +110,7 @@ private:
     // |  Private Methods
     // |
     // ----------------------------------------------------------------------
-    PermutationGeneratorUniquePtr CreateImpl(void) const override;
+    PermutationGeneratorUniquePtr CreateImpl(size_t maxNumTotalPermutations) const override;
 };
 
 // ----------------------------------------------------------------------
@@ -129,13 +129,8 @@ private:
 // |
 // ----------------------------------------------------------------------
 template <typename PermutationGeneratorT>
-PermutationGeneratorFactoryImpl<PermutationGeneratorT>::PermutationGeneratorFactoryImpl(size_t maxNumTotalPermutations) :
-    PermutationGeneratorFactory(maxNumTotalPermutations)
-{}
-
-template <typename PermutationGeneratorT>
-typename PermutationGeneratorFactoryImpl<PermutationGeneratorT>::PermutationGeneratorUniquePtr PermutationGeneratorFactoryImpl<PermutationGeneratorT>::CreateImpl(void) const /*override*/ {
-    return std::make_unique<PermutationGeneratorT>(_maxNumTotalPermutations);
+typename PermutationGeneratorFactoryImpl<PermutationGeneratorT>::PermutationGeneratorUniquePtr PermutationGeneratorFactoryImpl<PermutationGeneratorT>::CreateImpl(size_t maxNumTotalPermuations) const /*override*/ {
+    return std::make_unique<PermutationGeneratorT>(maxNumTotalPermuations);
 }
 
 } // namespace ConstrainedResource

@@ -35,8 +35,8 @@ function(Impl)
             # TODO ${_this_path}/../Resource.h
             # TODO ${_this_path}/../ResultSystem.cpp
             # TODO ${_this_path}/../ResultSystem.h
-            # TODO ${_this_path}/../StandardPermutationGenerator.cpp
-            # TODO ${_this_path}/../StandardPermutationGenerator.h
+            ${_this_path}/../StandardPermutationGenerator.cpp
+            ${_this_path}/../StandardPermutationGenerator.h
             # TODO ${_this_path}/../WorkingSystem.cpp
             # TODO ${_this_path}/../WorkingSystem.h
 
