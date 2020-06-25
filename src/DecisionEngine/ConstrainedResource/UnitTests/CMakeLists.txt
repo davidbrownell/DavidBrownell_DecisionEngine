@@ -27,7 +27,7 @@ function(Impl)
             ${_this_path}/Condition_UnitTest.cpp
             ${_this_path}/ConstrainedResource_UnitTest.cpp
             ${_this_path}/PermutationGenerator_UnitTest.cpp
-            # TODO ${_this_path}/PermutationGeneratorFactory_UnitTest.cpp
+            ${_this_path}/PermutationGeneratorFactory_UnitTest.cpp
             ${_this_path}/Request_UnitTest.cpp
             # TODO ${_this_path}/Resource_UnitTest.cpp
             # TODO ${_this_path}/ResultSystem_UnitTest.cpp

@@ -27,8 +27,8 @@ function(Impl)
             ${_this_path}/../ConstrainedResource.h
             ${_this_path}/../PermutationGenerator.cpp
             ${_this_path}/../PermutationGenerator.h
-            # TODO ${_this_path}/../PermutationGeneratorFactory.cpp
-            # TODO ${_this_path}/../PermutationGeneratorFactory.h
+            ${_this_path}/../PermutationGeneratorFactory.cpp
+            ${_this_path}/../PermutationGeneratorFactory.h
             ${_this_path}/../Request.cpp
             ${_this_path}/../Request.h
             # TODO ${_this_path}/../Resource.cpp
