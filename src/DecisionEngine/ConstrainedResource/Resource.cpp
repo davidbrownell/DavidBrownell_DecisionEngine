@@ -30,7 +30,7 @@ namespace ConstrainedResource {
 // |  Resource::State
 // |
 // ----------------------------------------------------------------------
-Resource::State::State(PrivateConstructorTag, Resource const &resource) :
+Resource::State::State(Resource const &resource) :
     _resource(resource.SharedFromThis())
 {}
 
@@ -72,6 +72,8 @@ std::string const & Resource::ToString(void) const {
 }
 
 Resource::EvaluateResult Resource::Evaluate(Request const &request, size_t maxNumEvaluations) const {
+    ENSURE_ARGUMENT(maxNumEvaluations);
+
     EvaluateResult                          result(EvaluateImpl(request, maxNumEvaluations));
     Evaluations const &                     evaluations(std::get<0>(result));
 
@@ -82,6 +84,9 @@ Resource::EvaluateResult Resource::Evaluate(Request const &request, size_t maxNu
 }
 
 Resource::EvaluateResult Resource::Evaluate(Request const &request, size_t maxNumEvaluations, State &continuationState) const {
+    ENSURE_ARGUMENT(maxNumEvaluations);
+    ENSURE_ARGUMENT(continuationState, continuationState._resource.get() == this);
+
     EvaluateResult                          result(EvaluateImpl(request, maxNumEvaluations, continuationState));
     Evaluations const &                     evaluations(std::get<0>(result));
 
@@ -92,6 +97,8 @@ Resource::EvaluateResult Resource::Evaluate(Request const &request, size_t maxNu
 }
 
 ResourcePtr Resource::Apply(State &applyState) const {
+    ENSURE_ARGUMENT(applyState, applyState._resource.get() == this);
+
     ResourcePtr                             result(ApplyImpl(applyState));
 
     if(!result)
@@ -137,7 +144,7 @@ Core::Components::Score::Result Resource::CalculateResult(Request const &request
     );
 
     // Calculate applicability
-    ConditionPtrsPtr const * const          ppApplicability[] = { &resource.OptionalApplicabilityConditions, &request.OptionalApplicabilityConditions };
+    ConditionPtrsPtr const * const          ppApplicability[] = { &request.OptionalApplicabilityConditions, &resource.OptionalApplicabilityConditions };
 
     ConditionResults                        applicabilityResults(applyConditionsFunc(ppApplicability, sizeof(ppApplicability) / sizeof(*ppApplicability)));
     ConditionResults                        requirementResults;
@@ -145,8 +152,8 @@ Core::Components::Score::Result Resource::CalculateResult(Request const &request
 
     // Only calculate requirements and preferences if everything is applicable
     if(std::all_of(applicabilityResults.cbegin(), applicabilityResults.cend(), [](ConditionResult const &result) { return result.IsSuccessful; })) {
-        ConditionPtrsPtr const * const      ppRequirements[] = { &resource.OptionalRequirementConditions, &request.OptionalRequirementConditions };
-        ConditionPtrsPtr const * const      ppPreferences[] = { &resource.OptionalPreferenceConditions, &request.OptionalPreferenceConditions };
+        ConditionPtrsPtr const * const      ppRequirements[] = { &request.OptionalRequirementConditions, &resource.OptionalRequirementConditions };
+        ConditionPtrsPtr const * const      ppPreferences[] = { &request.OptionalPreferenceConditions, &resource.OptionalPreferenceConditions };
 
         requirementResults = applyConditionsFunc(ppRequirements, sizeof(ppRequirements) / sizeof(*ppRequirements));
         preferenceResults = applyConditionsFunc(ppPreferences, sizeof(ppPreferences) / sizeof(*ppPreferences));

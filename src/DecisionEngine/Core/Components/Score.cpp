@@ -78,7 +78,8 @@ Score::Result::Result(
     Score(0.0f), // Placeholder
     ApplicabilityResults(std::move(applicabilityResults)),
     RequirementResults(std::move(requirementResults)),
-    PreferenceResults(std::move(preferenceResults)) {
+    PreferenceResults(std::move(preferenceResults))
+{
     // ----------------------------------------------------------------------
     struct Internal {
         static float CalculateScore(ConditionResults const &results) {
@@ -97,8 +98,12 @@ Score::Result::Result(
 
     make_mutable(IsApplicable) = std::all_of(ApplicabilityResults.cbegin(), ApplicabilityResults.cend(), [](Condition::Result const &cr) { return cr.IsSuccessful; });
 
-    if(IsApplicable == false)
+    if(IsApplicable == false) {
+        make_mutable(IsSuccessful) = true;
+        make_mutable(Score) = MaxScore;
+
         return;
+    }
 
     // The result is successful if all of the requirements are successful
     make_mutable(IsSuccessful) = std::all_of(RequirementResults.cbegin(), RequirementResults.cend(), [](Condition::Result const &cr) { return cr.IsSuccessful; });

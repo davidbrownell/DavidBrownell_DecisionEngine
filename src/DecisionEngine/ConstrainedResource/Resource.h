@@ -48,6 +48,8 @@ public:
     using Request                           = DecisionEngine::ConstrainedResource::Request;
     using ResourcePtr                       = DecisionEngine::ConstrainedResource::ResourcePtr;
 
+    using ConditionPtrsPtr                  = DecisionEngine::ConstrainedResource::ConditionPtrsPtr;
+
     /////////////////////////////////////////////////////////////////////////
     ///  \class         State
     ///  \brief         Information created during calls to 'Evaluate' that
@@ -57,11 +59,7 @@ public:
     ///                 instance.
     ///
     class State {
-    public:
-        // ----------------------------------------------------------------------
-        // |  Private Types (used in protected declarations)
-        struct PrivateConstructorTag {};
-
+    private:
         // ----------------------------------------------------------------------
         // |  Private Data (used in public declarations)
         ResourcePtr const                   _resource;
@@ -69,6 +67,7 @@ public:
     public:
         // ----------------------------------------------------------------------
         // |  Public Methods
+        State(Resource const &resource);
         virtual ~State(void) = default;
 
 #define ARGS                                MEMBERS(_resource)
@@ -79,11 +78,6 @@ public:
         SERIALIZATION(State, ARGS, FLAGS(SERIALIZATION_POLYMORPHIC_BASE));
 
 #undef ARGS
-
-    protected:
-        // ----------------------------------------------------------------------
-        // |  Protected Methods
-        State(PrivateConstructorTag tag, Resource const &resource);
 
     private:
         // Relationships
@@ -155,6 +149,9 @@ public:
         ConditionPtrsPtr optionalRequirementConditions=ConditionPtrsPtr(),
         ConditionPtrsPtr optionalPreferenceConditions=ConditionPtrsPtr()
     );
+
+    template <typename PrivateConstructorTagT>
+    Resource(PrivateConstructorTagT tag, Resource const &other);
 
     virtual ~Resource(void) = default;
 
@@ -263,6 +260,18 @@ Resource::Resource(
             }()
         )
     )
+{}
+
+// ----------------------------------------------------------------------
+// ----------------------------------------------------------------------
+// ----------------------------------------------------------------------
+template <typename PrivateConstructorTagT>
+Resource::Resource(PrivateConstructorTagT tag, Resource const &other) :
+    BoostHelpers::SharedObject(tag),
+    Name(other.Name),
+    OptionalApplicabilityConditions(other.OptionalApplicabilityConditions),
+    OptionalRequirementConditions(other.OptionalRequirementConditions),
+    OptionalPreferenceConditions(other.OptionalPreferenceConditions)
 {}
 
 } // namespace ConstrainedResource
