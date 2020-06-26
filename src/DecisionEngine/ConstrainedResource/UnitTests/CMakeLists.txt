@@ -22,8 +22,8 @@ function(Impl)
 
     build_tests(
         FILES
-            # TODO ${_this_path}/CalculatedResultSystem_UnitTest.cpp
-            # TODO ${_this_path}/CalculatedWorkingSystem_UnitTest.cpp
+            ${_this_path}/CalculatedResultSystem_UnitTest.cpp
+            ${_this_path}/CalculatedWorkingSystem_UnitTest.cpp
             ${_this_path}/Condition_UnitTest.cpp
             ${_this_path}/ConstrainedResource_UnitTest.cpp
             ${_this_path}/PermutationGenerator_UnitTest.cpp
@@ -32,7 +32,7 @@ function(Impl)
             ${_this_path}/Resource_UnitTest.cpp
             ${_this_path}/ResultSystem_UnitTest.cpp
             ${_this_path}/StandardPermutationGenerator_UnitTest.cpp
-            # TODO ${_this_path}/WorkingSystem_UnitTest.cpp
+            ${_this_path}/WorkingSystem_UnitTest.cpp
 
         PRECOMPILED_LIBRARY_HEADERS
             DecisionEngineConstrainedResource
