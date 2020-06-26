@@ -18,10 +18,10 @@ function(Impl)
             DecisionEngineConstrainedResource
 
         FILES
-            # TODO ${_this_path}/../CalculatedResultSystem.cpp
-            # TODO ${_this_path}/../CalculatedResultSystem.h
-            # TODO ${_this_path}/../CalculatedWorkingSystem.cpp
-            # TODO ${_this_path}/../CalculatedWorkingSystem.h
+            ${_this_path}/../CalculatedResultSystem.cpp
+            ${_this_path}/../CalculatedResultSystem.h
+            ${_this_path}/../CalculatedWorkingSystem.cpp
+            ${_this_path}/../CalculatedWorkingSystem.h
             ${_this_path}/../Condition.cpp
             ${_this_path}/../Condition.h
             ${_this_path}/../ConstrainedResource.h
@@ -37,8 +37,8 @@ function(Impl)
             ${_this_path}/../ResultSystem.h
             ${_this_path}/../StandardPermutationGenerator.cpp
             ${_this_path}/../StandardPermutationGenerator.h
-            # TODO ${_this_path}/../WorkingSystem.cpp
-            # TODO ${_this_path}/../WorkingSystem.h
+            ${_this_path}/../WorkingSystem.cpp
+            ${_this_path}/../WorkingSystem.h
 
         PRECOMPILED_HEADERS
             ${_this_path}/../ConstrainedResource.h

@@ -117,8 +117,19 @@ TEST_CASE("Construct - Errors") {
     CHECK_THROWS_MATCHES(
         MySystem(
             MySystem::TypeValue::Working,
+            MySystem::CompletionValue::Calculated,
+            NS::Score(NS::Condition::Result(g_pCondition, true), false).Commit(),
+            NS::Index()
+        ),
+        std::invalid_argument,
+        Catch::Matchers::Exception::ExceptionMessageMatcher("score")
+    );
+
+    CHECK_THROWS_MATCHES(
+        MySystem(
+            MySystem::TypeValue::Working,
             MySystem::CompletionValue::Concrete,
-            NS::Score(),
+            NS::Score(NS::Condition::Result(g_pCondition, true), false).Commit(),
             NS::Index(0)
         ),
         std::invalid_argument,
@@ -129,7 +140,7 @@ TEST_CASE("Construct - Errors") {
         MySystem(
             MySystem::TypeValue::Working,
             MySystem::CompletionValue::Calculated,
-            NS::Score(),
+            NS::Score(NS::Condition::Result(g_pCondition, true), false),
             NS::Index()
         ),
         std::invalid_argument,
@@ -138,17 +149,45 @@ TEST_CASE("Construct - Errors") {
 }
 
 TEST_CASE("UpdateScore") {
-    MySystem                                system(
-        MySystem::TypeValue::Working,
-        MySystem::CompletionValue::Calculated,
-        NS::Score(),
-        NS::Index(1)
-    );
+    SECTION("Calculated") {
+        MySystem                            system(
+            MySystem::TypeValue::Working,
+            MySystem::CompletionValue::Calculated,
+            NS::Score(NS::Condition::Result(g_pCondition, false), false),
+            NS::Index(1)
+        );
 
-    CHECK(system.GetScore() == NS::Score());
+        CHECK(system.GetScore() == NS::Score(NS::Condition::Result(g_pCondition, false), false));
 
-    system.UpdateScore(NS::Score(NS::Condition::Result(g_pCondition, true), false));
-    CHECK(system.GetScore() == NS::Score(NS::Condition::Result(g_pCondition, true), false));
+        system.UpdateScore(NS::Score(NS::Condition::Result(g_pCondition, true), false));
+        CHECK(system.GetScore() == NS::Score(NS::Condition::Result(g_pCondition, true), false));
+
+        CHECK_THROWS_MATCHES(
+            system.UpdateScore(NS::Score(NS::Condition::Result(g_pCondition, true), false).Commit()),
+            std::invalid_argument,
+            Catch::Matchers::Exception::ExceptionMessageMatcher("score")
+        );
+    }
+
+    SECTION("Concrete") {
+        MySystem                            system(
+            MySystem::TypeValue::Working,
+            MySystem::CompletionValue::Concrete,
+            NS::Score(NS::Condition::Result(g_pCondition, false), false).Commit(),
+            NS::Index(1).Commit()
+        );
+
+        CHECK(system.GetScore() == NS::Score(NS::Condition::Result(g_pCondition, false), false).Commit());
+
+        system.UpdateScore(NS::Score(NS::Condition::Result(g_pCondition, true), false).Commit());
+        CHECK(system.GetScore() == NS::Score(NS::Condition::Result(g_pCondition, true), false).Commit());
+
+        CHECK_THROWS_MATCHES(
+            system.UpdateScore(NS::Score(NS::Condition::Result(g_pCondition, true), false)),
+            std::invalid_argument,
+            Catch::Matchers::Exception::ExceptionMessageMatcher("score")
+        );
+    }
 }
 
 TEST_CASE("UpdateScore - Error") {
@@ -267,13 +306,13 @@ TEST_CASE("Compare") {
             MySystem(
                 MySystem::TypeValue::Working,
                 MySystem::CompletionValue::Calculated,
-                NS::Score(),
+                NS::Score(NS::Condition::Result(g_pCondition, true), false),
                 NS::Index(1)
             ),
             MySystem(
                 MySystem::TypeValue::Result,
                 MySystem::CompletionValue::Concrete,
-                NS::Score(),
+                NS::Score(NS::Condition::Result(g_pCondition, true), false).Commit(),
                 NS::Index(1).Commit()
             )
         ) == 0
