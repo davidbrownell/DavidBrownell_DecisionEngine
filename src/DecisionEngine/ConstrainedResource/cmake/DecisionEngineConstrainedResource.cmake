@@ -18,8 +18,8 @@ function(Impl)
             DecisionEngineConstrainedResource
 
         FILES
-            # TODO ${_this_path}/../CalculatedResultSystem.cpp
-            # TODO ${_this_path}/../CalculatedResultSystem.h
+            ${_this_path}/../CalculatedResultSystem.cpp
+            ${_this_path}/../CalculatedResultSystem.h
             # TODO ${_this_path}/../CalculatedWorkingSystem.cpp
             # TODO ${_this_path}/../CalculatedWorkingSystem.h
             ${_this_path}/../Condition.cpp

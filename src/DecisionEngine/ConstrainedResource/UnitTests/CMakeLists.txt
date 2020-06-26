@@ -22,7 +22,7 @@ function(Impl)
 
     build_tests(
         FILES
-            # TODO ${_this_path}/CalculatedResultSystem_UnitTest.cpp
+            ${_this_path}/CalculatedResultSystem_UnitTest.cpp
             # TODO ${_this_path}/CalculatedWorkingSystem_UnitTest.cpp
             ${_this_path}/Condition_UnitTest.cpp
             ${_this_path}/ConstrainedResource_UnitTest.cpp

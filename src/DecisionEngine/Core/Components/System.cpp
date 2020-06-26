@@ -37,6 +37,7 @@ System::System(TypeValue type, CompletionValue completion, Score score, Index in
     Completion(std::move(completion))
 {
     if(Completion == CompletionValue::Calculated) {
+        ENSURE_ARGUMENT(score, _score.HasSuffix());
         ENSURE_ARGUMENT(index, _index.HasSuffix());
     }
     else if(Completion == CompletionValue::Concrete) {
@@ -48,9 +49,14 @@ System::System(TypeValue type, CompletionValue completion, Score score, Index in
 }
 
 System & System::UpdateScore(Score score) {
-    if(Completion == CompletionValue::Concrete) {
+    if(Completion == CompletionValue::Calculated) {
+        ENSURE_ARGUMENT(score, score.HasSuffix());
+    }
+    else if(Completion == CompletionValue::Concrete) {
         ENSURE_ARGUMENT(score, score.HasSuffix() == false);
     }
+    else
+        assert(!"Unexpected CompletionValue");
 
     _score = std::move(score);
     return *this;
